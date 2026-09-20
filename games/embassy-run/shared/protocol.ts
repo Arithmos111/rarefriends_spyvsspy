@@ -37,7 +37,13 @@ export const SEARCH_MS = 900;
 export const SEARCH_MS_LOCKPICK = 550;
 export const PLANT_MS = 700;
 export const DISARM_MS = 850;
-export const INTERACT_RANGE = 52;
+/**
+ * Reach must exceed every furniture footprint's half-width plus the player radius, or an
+ * agent cannot stand anywhere that is both outside the object and close enough to use it.
+ * The widest piece (desk, 82 across) needs 56; this leaves margin on top. Covered by
+ * "every furniture type can be reached from every side" in tests/sim.test.mjs.
+ */
+export const INTERACT_RANGE = 74;
 
 export const ATTACK_RANGE = 46;
 export const ATTACK_COOLDOWN_MS = 1200;

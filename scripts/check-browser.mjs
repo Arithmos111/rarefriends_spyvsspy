@@ -162,16 +162,25 @@ try {
   assert.ok(Number.isFinite(nearX) && Number.isFinite(nearY), "the canvas should report the nearest furniture");
   const box = await canvasOne.boundingBox();
   const [targetScreenX, targetScreenY] = project(nearX, nearY);
+  const scale = Math.min(box.width / 960, box.height / 640);
   await canvasOne.click({ position: {
-    x: targetScreenX * box.width / 960,
-    y: targetScreenY * box.height / 640,
+    x: targetScreenX * scale + (box.width - 960 * scale) / 2,
+    y: targetScreenY * scale + (box.height - 640 * scale) / 2,
   } });
-  await one.page.waitForFunction(
-    () => document.querySelector("iframe").contentDocument?.querySelector(".er-canvas")?.dataset.inReach === "1",
-    null, { timeout: 15000 },
-  ).catch(async () => {
-    assert.equal(await canvasOne.getAttribute("data-in-reach"), "1", "tap-to-walk should reach the nearest furniture");
-  });
+  // The child iframe is sandboxed without allow-same-origin, so contentDocument is null from
+  // the parent. Poll the attribute through the frame locator instead.
+  const waitForAttribute = async (locator, name, value, timeoutMs = 15000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await locator.getAttribute(name) === value) return true;
+      await one.page.waitForTimeout(150);
+    }
+    return false;
+  };
+  assert.ok(
+    await waitForAttribute(canvasOne, "data-in-reach", "1"),
+    "tap-to-walk should bring the agent into reach of the nearest furniture",
+  );
   step("tap-to-walk brought the agent into reach of the nearest furniture");
 
   await one.child.getByRole("button", { name: /^Search/ }).click();

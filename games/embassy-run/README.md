@@ -38,8 +38,10 @@ against yourself. The printed LAN URL works from a phone on the same wifi.
 | **1 / 2 / 3** | Set a letter bomb, spring trap or water bucket directly |
 | **Esc** | Close a menu |
 
-Sound is off by default. Mute and reduce-motion live in the in-match settings menu (≡).
-Reduced motion is also picked up from your system setting.
+Sound is off by default. Mute and reduce-motion live in the in-match settings menu (≡), and
+reduced motion is also picked up from your system setting. If a Friend's artwork fails to load
+it is drawn as a dashed placeholder with a **Retry artwork** control; the relay reconnects on
+its own and says so in the match header while it is away.
 
 ## Rules
 
@@ -149,9 +151,13 @@ npm run check:game
 npm run check:browser
 ```
 
+This directory is also drop-in valid inside a FriendSDK checkout. Copied to `games/embassy-run`
+there, the SDK's own `npm run check:games` reports it valid, and the SDK's `npm test` (111 tests,
+109 passed, 2 skipped where Foundry is unavailable) and `npm run typecheck` stay clean.
+
 `npm test` covers the simulation: map determinism and walkability, item placement,
-doorways, searching, traps, combat, drops, escaping, the timer, and the client and
-server agreeing step for step. `npm run check:browser` drives two real browsers
+doorways, searching, traps, combat, drops, escaping, the timer, the client and server
+agreeing step for step, and that every furniture type can be reached from every side. `npm run check:browser` drives two real browsers
 through the SDK's ownership gate, buys and opens a crate, creates and joins a lobby,
 plays a live match and asserts the SDK container bounds hold at desktop and phone
 widths.

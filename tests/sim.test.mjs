@@ -287,3 +287,36 @@ test("stale input sequence numbers are ignored", () => {
   sim.applyInput(match, "a", 4, -1, 0);
   assert.equal(match.players.get("a").input.dx, 1);
 });
+
+test("every furniture type can be reached from every side", () => {
+  // An agent must be able to stand somewhere that is outside a piece's footprint AND within
+  // INTERACT_RANGE of it, or that piece is impossible to search from that direction.
+  for (const [type, footprint] of Object.entries(P.FURNITURE_FOOTPRINT)) {
+    const clearanceX = footprint.w / 2 + P.PLAYER_RADIUS;
+    const clearanceY = footprint.h / 2 + P.PLAYER_RADIUS;
+    assert.ok(clearanceX <= P.INTERACT_RANGE,
+      `${type}: needs ${clearanceX} clearance along x but reach is only ${P.INTERACT_RANGE}`);
+    assert.ok(clearanceY <= P.INTERACT_RANGE,
+      `${type}: needs ${clearanceY} clearance along y but reach is only ${P.INTERACT_RANGE}`);
+  }
+});
+
+test("a real generated room lets an agent reach every piece it holds", () => {
+  const embassy = map.createMap(20260920);
+  for (const room of embassy.rooms) {
+    for (const piece of room.furniture) {
+      let reachable = false;
+      for (let step = 0; step < 48 && !reachable; step++) {
+        const angle = (step / 48) * Math.PI * 2;
+        for (let radius = 20; radius <= P.INTERACT_RANGE; radius += 2) {
+          const x = piece.x + Math.cos(angle) * radius;
+          const y = piece.y + Math.sin(angle) * radius;
+          if (!map.insideRoom(x, y) || map.blockedByFurniture(room, x, y)) continue;
+          reachable = true;
+          break;
+        }
+      }
+      assert.ok(reachable, `room ${room.index}: ${piece.type} at ${piece.x},${piece.y} is unreachable`);
+    }
+  }
+});

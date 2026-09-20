@@ -1,0 +1,10 @@
+node_modules
+vendor
+.build
+.git
+.gitignore
+*.tgz
+*.log
+Dockerfile
+.dockerignore
+fly.toml

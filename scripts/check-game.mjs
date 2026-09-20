@@ -55,9 +55,12 @@ for (const source of Object.keys(result.metafile.inputs)) {
   }
   const local = path.relative(gameDir, full);
   const insideGame = !local.startsWith(`..${path.sep}`) && local !== "..";
-  const insideSdk = full.startsWith(sdkRoot + path.sep);
+  // Exactly the SDK's own rule for games/: the game directory, or the SDK's dist/, src/ and
+  // node_modules/. Notably NOT the SDK's assets/ — the runner injects its stylesheets itself.
+  const allowedSdk = ["dist", "src", "node_modules"]
+    .some(folder => full.startsWith(path.join(sdkRoot, folder) + path.sep));
   const insideModules = full.startsWith(path.join(root, "node_modules") + path.sep);
-  if (!insideGame && !insideSdk && !insideModules) {
+  if (!insideGame && !allowedSdk && !insideModules) {
     throw new Error(`undeclared source outside the game/SDK: ${source}`);
   }
 }

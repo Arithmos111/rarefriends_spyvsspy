@@ -16,7 +16,8 @@ import { formatGameAmount } from "@rarefriends/friendsdk/ui";
 import { maximumPrize, type GamePlay, type GameSnapshot } from "@rarefriends/friendsdk/game";
 import { createFriendReader } from "@rarefriends/friendsdk/sprites";
 import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "@rarefriends/friendsdk/sounds";
-import "@rarefriends/friendsdk/frame.css";
+// frame.css and runtime.css are injected into the child document by the SDK runner, and a
+// game directory may not bundle anything from the SDK's assets/ folder.
 
 import { createNet, type Net, type NetStatus } from "./net.ts";
 import { drawEmbassy, unproject, VIEW_H, VIEW_W } from "./render.ts";
@@ -26,7 +27,10 @@ import {
   type LobbyMember, type LobbySummary, type MatchEvent, type MatchSnapshot,
   type PublicPlayer, type ServerMessage, type TrapType,
 } from "./shared/protocol.ts";
-import { EXIT_RADIUS, EXIT_X, EXIT_Y, createMap, type EmbassyMap } from "./shared/mansion.ts";
+import {
+  EXIT_RADIUS, EXIT_X, EXIT_Y, blockedByFurniture, createMap, insideRoom,
+  type EmbassyMap, type Room,
+} from "./shared/mansion.ts";
 import { KITS, FIELD_KIT_ID, kitById } from "./shared/loadouts.ts";
 import { movePlayer, type Facing } from "./shared/sim.ts";
 import "./style.css";
@@ -36,6 +40,29 @@ type Menu = "crate" | "kits" | "settings" | "join" | "create" | "reveal" | "trap
 
 const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
 const distance = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
+
+/**
+ * Tapping furniture means "go and use that", not "walk inside it". Find the closest spot the
+ * agent can actually stand that still puts the destination within reach.
+ */
+function approachPoint(room: Room, target: { x: number; y: number }, from: { x: number; y: number }) {
+  // Expand outward from the object and take the first ring with somewhere to stand, choosing
+  // the spot nearest the agent. INTERACT_RANGE is set so this always lands within reach.
+  for (let radius = 30; radius <= 96; radius += 6) {
+    let best: { x: number; y: number } | null = null;
+    let bestGap = Infinity;
+    for (let step = 0; step < 24; step++) {
+      const angle = (step / 24) * Math.PI * 2;
+      const x = target.x + Math.cos(angle) * radius;
+      const y = target.y + Math.sin(angle) * radius;
+      if (!insideRoom(x, y) || blockedByFurniture(room, x, y)) continue;
+      const gap = distance(x, y, from.x, from.y);
+      if (gap < bestGap) { bestGap = gap; best = { x, y }; }
+    }
+    if (best) return best;
+  }
+  return null;
+}
 
 type LobbyView = {
   code: string; name: string; isPrivate: boolean;
@@ -72,6 +99,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const [lobbyName, setLobbyName] = useState("");
   const [privateLobby, setPrivateLobby] = useState(false);
   const [spriteTick, setSpriteTick] = useState(0);
+  const [artworkFailed, setArtworkFailed] = useState(0);
+  const [enteringMatch, setEnteringMatch] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const netRef = useRef<Net | null>(null);
@@ -179,10 +208,12 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       case "lobby.left":
         setLobby(null);
         setMatch(null);
+        setEnteringMatch(false);
         break;
       case "match.start": {
         mapRef.current = createMap(message.seed);
         walkToRef.current = null;
+        setEnteringMatch(true);
         setResults(null);
         setFeed([]);
         seqRef.current = 1;
@@ -191,6 +222,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       case "snapshot": {
         const previous = matchRef.current;
         setMatch(message);
+        setEnteringMatch(false);
         const self = message.self;
         const predicted = predictedRef.current;
         if (!previous || previous.roomIndex !== message.roomIndex || predicted.room !== message.roomIndex
@@ -209,6 +241,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       case "match.end":
         setResults({ winnerName: message.winnerName, reason: message.reason, results: message.results });
         setMatch(null);
+        setEnteringMatch(false);
         soundRef.current?.play(message.winner && message.winner === identityRef.current?.playerId ? "reward" : "reveal-common");
         break;
       case "error":
@@ -234,22 +267,48 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     return () => clearInterval(timer);
   }, [screen, netStatus]);
 
-  // ---- Sprite loading -------------------------------------------------------------------
+  // ---- Friend artwork -------------------------------------------------------------------
+  // Loading is driven from the render loop rather than an effect keyed on the snapshot: a
+  // snapshot arrives 20 times a second, and an effect cleanup on every one of those would
+  // cancel each artwork read long before it resolved, leaving every Friend a placeholder.
+  const unmountedRef = useRef(false);
   useEffect(() => {
-    if (!match) return;
-    readerRef.current ??= createFriendReader();
-    const reader = readerRef.current;
-    const wanted = new Set<string>([match.self.friendId, ...match.actors.map(actor => actor.friendId)]);
-    let cancelled = false;
-    for (const id of wanted) {
+    unmountedRef.current = false;
+    return () => { unmountedRef.current = true; };
+  }, []);
+
+  const countArtworkFailures = () =>
+    [...spritesRef.current.values()].filter(entry => entry === "error").length;
+
+  const ensureSprites = useCallback((ids: readonly string[]) => {
+    const reader = (readerRef.current ??= createFriendReader());
+    for (const id of ids) {
       if (spritesRef.current.has(id)) continue;
       spritesRef.current.set(id, "loading");
       reader.read(BigInt(id))
-        .then(sprites => { if (!cancelled) { spritesRef.current.set(id, sprites); setSpriteTick(value => value + 1); } })
-        .catch(() => { if (!cancelled) { spritesRef.current.set(id, "error"); setSpriteTick(value => value + 1); } });
+        .then(sprites => {
+          if (unmountedRef.current) return;
+          spritesRef.current.set(id, sprites);
+          setSpriteTick(value => value + 1);
+        })
+        .catch(() => {
+          if (unmountedRef.current) return;
+          spritesRef.current.set(id, "error");
+          setSpriteTick(value => value + 1);
+          setArtworkFailed(countArtworkFailures());
+        });
     }
-    return () => { cancelled = true; };
-  }, [match?.self.friendId, match?.actors.map(actor => actor.friendId).join(","), match]);
+  }, []);
+
+  /** Drop failed artwork so the render loop re-requests it. */
+  const retryArtwork = useCallback(() => {
+    for (const [id, entry] of [...spritesRef.current.entries()]) {
+      if (entry === "error") spritesRef.current.delete(id);
+    }
+    readerRef.current?.clear();
+    setArtworkFailed(0);
+    setSpriteTick(value => value + 1);
+  }, []);
 
   // ---- Interaction targets --------------------------------------------------------------
   type Targets = {
@@ -395,6 +454,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     canvas.focus({ preventScroll: true });
     let frame = 0;
     let previous = performance.now();
+    let stalledMs = 0;
+    let lastX = 0, lastY = 0;
 
     const loop = (nowMs: number) => {
       const delta = Math.min(50, nowMs - previous);
@@ -403,6 +464,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       const embassy = mapRef.current;
       if (snapshot && embassy) {
         const self = snapshot.self;
+        ensureSprites([self.friendId, ...snapshot.actors.map(actor => actor.friendId)]);
         const canMove = !self.busy && self.stunnedMs <= 0 && self.respawnMs <= 0 && !pausedRef.current;
         if (canMove) {
           const [dx, dy] = inputVector();
@@ -410,6 +472,18 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         } else {
           predictedRef.current.walking = false;
         }
+
+        // Tap-to-walk steers in a straight line with no pathfinding, so a destination behind
+        // furniture can leave the agent pressing into a corner. Give the target up instead.
+        if (walkToRef.current) {
+          const moved = Math.hypot(predictedRef.current.x - lastX, predictedRef.current.y - lastY);
+          stalledMs = moved < 0.4 ? stalledMs + delta : 0;
+          if (stalledMs > 1200) { walkToRef.current = null; stalledMs = 0; }
+        } else {
+          stalledMs = 0;
+        }
+        lastX = predictedRef.current.x;
+        lastY = predictedRef.current.y;
 
         const next = computeTargets(snapshot);
         const previousTargets = targetsRef.current;
@@ -446,13 +520,19 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [screen, inputVector, computeTargets]);
+  }, [screen, inputVector, computeTargets, ensureSprites]);
 
   const onCanvasPointer = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     if (inputBlocked || !matchRef.current) return;
+    // Map the pointer through the same letterbox the browser would apply, so the hit test
+    // stays correct even if the element box is not exactly 3:2.
     const rect = event.currentTarget.getBoundingClientRect();
-    const sx = (event.clientX - rect.left) * VIEW_W / rect.width;
-    const sy = (event.clientY - rect.top) * VIEW_H / rect.height;
+    const scale = Math.min(rect.width / VIEW_W, rect.height / VIEW_H);
+    if (!(scale > 0)) return;
+    const insetX = (rect.width - VIEW_W * scale) / 2;
+    const insetY = (rect.height - VIEW_H * scale) / 2;
+    const sx = (event.clientX - rect.left - insetX) / scale;
+    const sy = (event.clientY - rect.top - insetY) / scale;
     const [wx, wy] = unproject(sx, sy);
     const snapshot = matchRef.current;
     const me = predictedRef.current;
@@ -475,11 +555,15 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       sendAction({ kind: "escape" });
       return;
     }
-    walkToRef.current = {
+    let destination = {
       x: Math.max(0, Math.min(ROOM_W, wx)),
       y: Math.max(0, Math.min(ROOM_H, wy)),
-      room: snapshot.roomIndex,
     };
+    const room = mapRef.current?.rooms[snapshot.roomIndex];
+    if (room && (!insideRoom(destination.x, destination.y) || blockedByFurniture(room, destination.x, destination.y))) {
+      destination = approachPoint(room, destination, me) ?? destination;
+    }
+    walkToRef.current = { ...destination, room: snapshot.roomIndex };
   }, [inputBlocked, sendAction]);
 
   // ---- Lobby commands -------------------------------------------------------------------
@@ -582,7 +666,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       onDisarm={() => targets.furniture && sendAction({ kind: "disarm", furnitureId: targets.furniture.id })}
       onSettings={() => setMenu("settings")}
       stickRef={stickRef} inputBlocked={inputBlocked} reducedMotion={reducedMotion}
-      netStatus={netStatus}
+      netStatus={netStatus} artworkFailed={artworkFailed} onRetryArtwork={retryArtwork}
     />}
 
     {screen === "results" && results && <ResultsScreen
@@ -834,6 +918,7 @@ function MatchScreen(props: any) {
   const {
     match, feed, targets, canvasRef, onCanvasPointer, onPrimary, onAttack, onTraps,
     onDisarm, onSettings, stickRef, inputBlocked, reducedMotion, netStatus,
+    artworkFailed, onRetryArtwork,
   } = props;
   const self = match.self as MatchSnapshot["self"];
   const minutes = Math.floor(match.secondsLeft / 60);
@@ -865,6 +950,11 @@ function MatchScreen(props: any) {
       {down && <div className="er-down" role="status">
         <strong>Taken out</strong>
         <span>Back in {Math.ceil(self.respawnMs / 1000)}s</span>
+      </div>}
+
+      {artworkFailed > 0 && <div className="er-artwork-error" role="alert">
+        <span>{artworkFailed === 1 ? "A Friend's artwork could not load." : `${artworkFailed} Friends' artwork could not load.`}</span>
+        <button type="button" onClick={onRetryArtwork}>Retry artwork</button>
       </div>}
 
       <ul className="er-feed" aria-live="polite">

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Build the game with FriendSDK's bundler in watch mode and serve it with the relay attached. */
-import { announce, attachRelay, GAME_DIR, loadSdkRunner, OUT_DIR, parseHostArgs } from "./host.mjs";
+import "./preflight.mjs";
+const { announce, attachRelay, GAME_DIR, loadSdkRunner, OUT_DIR, parseHostArgs } = await import("./host.mjs");
 
 const { host, port } = parseHostArgs(process.argv.slice(2));
 const { buildGame, createGameServer } = await loadSdkRunner();

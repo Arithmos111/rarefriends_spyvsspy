@@ -12,6 +12,11 @@ share an embassy, with matchmaking lobbies so dozens can play at once.
 The game rules, controls, exact economy and known issues are in
 **[games/embassy-run/README.md](games/embassy-run/README.md)**.
 
+The vibeathon entry is drafted at
+[submissions/embassy-run/README.md](submissions/embassy-run/README.md), at the same path the
+submission pull request needs. Its four source links carry a `REPLACE_SHA` placeholder to be
+filled with the submitted commit.
+
 ## Play it
 
 Needs **Node.js 22+**, npm and git, plus a browser wallet holding a hardwired Rare
@@ -37,6 +42,46 @@ npm start       # serve that bundle with the relay
 ```
 
 Set `PORT` and `HOST`, or pass `--port` and `--host`, to change where it listens.
+
+## Deploying it
+
+```sh
+fly launch --no-deploy --copy-config   # pick your own app name
+fly deploy
+```
+
+A `Dockerfile` and `fly.toml` are included; any host that runs a container works the same way.
+
+**What the host must provide.** Node.js 22.18 or newer, because the server imports the shared
+simulation as TypeScript and relies on Node's native type stripping. A long-lived process, not
+serverless, because the connection is a WebSocket and match state lives in memory. TLS, because
+browser wallets need a secure context and `wss://` needs HTTPS. WebSocket passthrough on any
+proxy or CDN in front. Outbound HTTPS to the Rare Friends RPC, which degrades gracefully to "no
+Genesis perk" if blocked. No database.
+
+**The static files cannot live on a separate CDN origin.** The SDK's sandbox allows
+`connect-src 'self'`, so the WebSocket must share an origin with the game document. One origin
+serves both, or nothing connects.
+
+**Run exactly one instance.** Lobbies and matches are in-process, so a second instance serves a
+second, disconnected lobby list. Scale the machine up, not out. Scaling out later needs sticky
+routing by lobby code, or moving state to Redis.
+
+**Sizing, measured rather than estimated.** Load-tested with synthetic clients speaking the real
+protocol against the real relay:
+
+| Load | CPU | Memory | Downstream |
+| --- | --- | --- | --- |
+| 40 players, 10 matches | 7.6% of one core | 124 MB | 1.25 MB/s |
+| 120 players, 30 matches | 14% of one core | 151 MB | 3.7 MB/s |
+
+Snapshot delivery held at 19.7 Hz against a 20 Hz target at 120 players. One shared vCPU with
+512 MB to 1 GB comfortably covers that. Bandwidth is the binding constraint, not CPU: each
+player pulls about 32 KiB/s, so 100 concurrent players for an hour is roughly 11 GB. If that
+ever matters, the lever is the snapshot, which is about 1.6 KB and currently resends static
+furniture and the full scoreboard every tick.
+
+Set `RF_GENESIS_ADDRESS` to switch on the Genesis perk once that contract address is available.
 
 ## How it fits together
 
@@ -91,7 +136,7 @@ npm run check      # typecheck, unit tests, game validation and the browser chec
 | Command | What it covers |
 | --- | --- |
 | `npm run typecheck` | TypeScript across the game and shared simulation |
-| `npm test` | 21 simulation tests: determinism, doors, searching, traps, combat, drops, escaping, the timer, and client/server agreement |
+| `npm test` | 23 simulation tests: determinism, doorways, searching, traps, combat, drops, escaping, the timer, client/server agreement, and furniture reachability |
 | `npm run check:game` | Mirrors the SDK's own game validation: definition parses, weights total 10,000 bps, expected reward below price, no wallet transport in game code, no sources outside the game or SDK |
 | `npm run check:browser` | Drives two real browsers through the SDK ownership gate, buys and opens a crate, creates and joins a lobby, plays a live match, and asserts the SDK container bounds hold at desktop and phone widths |
 

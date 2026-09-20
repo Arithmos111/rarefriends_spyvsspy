@@ -1,0 +1,40 @@
+# Embassy Run on Fly.io.
+#
+# One machine, always on. The relay keeps lobbies and live matches in process memory, so a
+# second machine would serve a second, disconnected lobby list, and a machine that stops
+# drops every match it was hosting. Scale this app by making the machine bigger, not by
+# adding machines.
+#
+#   fly launch --no-deploy --copy-config    # pick your own app name
+#   fly deploy
+#
+# Optional, to switch on the Genesis perk once you have the contract address:
+#   fly secrets set RF_GENESIS_ADDRESS=0x...
+
+app = "embassy-run"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Stopping a machine would kill every live match, so keep exactly one running.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    # Each player holds one WebSocket. Measured: ~14% of a core at 120 players.
+    soft_limit = 200
+    hard_limit = 400
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

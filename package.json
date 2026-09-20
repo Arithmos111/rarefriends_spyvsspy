@@ -5,7 +5,7 @@
   "description": "Embassy Run \u2014 a four-player Spy vs Spy-style stealth game built on FriendSDK v0.1",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "setup": "node scripts/setup-sdk.mjs",

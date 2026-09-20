@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /** Serve an existing build with the relay. Used for deployment; run `npm run build` first. */
+import "./preflight.mjs";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { announce, attachRelay, loadSdkRunner, OUT_DIR, parseHostArgs } from "./host.mjs";
+const { announce, attachRelay, loadSdkRunner, OUT_DIR, parseHostArgs } = await import("./host.mjs");
 
 const { host, port } = parseHostArgs(process.argv.slice(2));
 await access(path.join(OUT_DIR, "index.html")).catch(() => {

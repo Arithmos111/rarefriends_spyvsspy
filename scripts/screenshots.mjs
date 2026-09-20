@@ -87,7 +87,8 @@ try {
   await two.child.getByRole("button", { name: "Ready", exact: true }).click();
   await one.child.locator(".er-canvas").waitFor({ timeout: 20000 });
   await two.child.locator(".er-canvas").waitFor({ timeout: 20000 });
-  await one.page.waitForTimeout(1500);
+  // Give the canonical Friend artwork time to arrive before capturing.
+  await one.page.waitForTimeout(4000);
   await shot(one.page, "4-match-desktop");
   await shot(two.page, "5-match-phone");
 
