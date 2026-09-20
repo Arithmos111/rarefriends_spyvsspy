@@ -45,23 +45,39 @@ Set `PORT` and `HOST`, or pass `--port` and `--host`, to change where it listens
 
 ## Deploying it
 
+Full instructions, including troubleshooting, are in **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
+**On a VPS (Hostinger, Hetzner, DigitalOcean, anything with Docker).** A Compose stack runs the
+game behind Caddy, which obtains and renews certificates on its own:
+
+```sh
+cp .env.example .env    # set DOMAIN to a hostname already pointing at the machine
+docker compose up -d --build
+```
+
+**On Fly.io.** `fly.toml` and the `Dockerfile` are ready:
+
 ```sh
 fly launch --no-deploy --copy-config   # pick your own app name
 fly deploy
 ```
 
-A `Dockerfile` and `fly.toml` are included; any host that runs a container works the same way.
-
 **What the host must provide.** Node.js 22.18 or newer, because the server imports the shared
 simulation as TypeScript and relies on Node's native type stripping. A long-lived process, not
-serverless, because the connection is a WebSocket and match state lives in memory. TLS, because
-browser wallets need a secure context and `wss://` needs HTTPS. WebSocket passthrough on any
-proxy or CDN in front. Outbound HTTPS to the Rare Friends RPC, which degrades gracefully to "no
-Genesis perk" if blocked. No database.
+serverless, because the connection is a WebSocket and match state lives in memory. TLS on a
+real domain, because browser wallets need a secure context and a bare IP will not do. WebSocket
+passthrough on any proxy in front. Outbound HTTPS to the Rare Friends RPC, which degrades
+gracefully to "no Genesis perk" if blocked. No database.
+
+**Shared web hosting will not work,** even where it advertises Node.js support. Per-account
+connection limits and resource controls throttle exactly the pattern this uses, one long-lived
+socket per player.
 
 **The static files cannot live on a separate CDN origin.** The SDK's sandbox allows
 `connect-src 'self'`, so the WebSocket must share an origin with the game document. One origin
-serves both, or nothing connects.
+serves both, or nothing connects. That rules out GitHub Pages entirely, including the
+"static on Pages, relay elsewhere" split. `npm run check:proxy` guards this by driving a real
+browser through a reverse proxy in the production shape.
 
 **Run exactly one instance.** Lobbies and matches are in-process, so a second instance serves a
 second, disconnected lobby list. Scale the machine up, not out. Scaling out later needs sticky
@@ -76,7 +92,7 @@ protocol against the real relay:
 | 120 players, 30 matches | 14% of one core | 151 MB | 3.7 MB/s |
 
 Snapshot delivery held at 19.7 Hz against a 20 Hz target at 120 players. One shared vCPU with
-512 MB to 1 GB comfortably covers that. Bandwidth is the binding constraint, not CPU: each
+512 MB to 1 GB covers that comfortably. Bandwidth is the binding constraint, not CPU: each
 player pulls about 32 KiB/s, so 100 concurrent players for an hour is roughly 11 GB. If that
 ever matters, the lever is the snapshot, which is about 1.6 KB and currently resends static
 furniture and the full scoreboard every tick.
@@ -139,6 +155,7 @@ npm run check      # typecheck, unit tests, game validation and the browser chec
 | `npm test` | 23 simulation tests: determinism, doorways, searching, traps, combat, drops, escaping, the timer, client/server agreement, and furniture reachability |
 | `npm run check:game` | Mirrors the SDK's own game validation: definition parses, weights total 10,000 bps, expected reward below price, no wallet transport in game code, no sources outside the game or SDK |
 | `npm run check:browser` | Drives two real browsers through the SDK ownership gate, buys and opens a crate, creates and joins a lobby, plays a live match, and asserts the SDK container bounds hold at desktop and phone widths |
+| `npm run check:proxy` | Stands up the production shape, a reverse proxy in front of the app, and confirms the sandboxed frame still reaches the relay through it |
 
 `npm run screenshots` captures reference images of each screen into `.build/shots`.
 

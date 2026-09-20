@@ -16,8 +16,9 @@
     "check:game": "node scripts/check-game.mjs",
     "check:browser": "node scripts/check-browser.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "npm run typecheck && npm test && npm run check:game && npm run check:browser",
-    "screenshots": "node scripts/screenshots.mjs"
+    "check": "npm run typecheck && npm test && npm run check:game && npm run check:browser && npm run check:proxy",
+    "screenshots": "node scripts/screenshots.mjs",
+    "check:proxy": "node scripts/check-proxy.mjs"
   },
   "dependencies": {
     "@rarefriends/friendsdk": "file:vendor/rarefriends-friendsdk-0.1.0.tgz",

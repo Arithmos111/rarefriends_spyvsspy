@@ -8,3 +8,10 @@ vendor
 Dockerfile
 .dockerignore
 fly.toml
+.env
+.env.*
+!.env.example
+docker-compose.yml
+Caddyfile
+docs
+submissions

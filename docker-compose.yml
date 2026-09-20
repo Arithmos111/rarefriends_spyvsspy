@@ -1,0 +1,50 @@
+# Embassy Run on a single VPS, with automatic TLS.
+#
+#   cp .env.example .env     # set DOMAIN to a name pointing at this machine
+#   docker compose up -d --build
+#
+# One app container and one reverse proxy. Do not scale the game service: lobbies and live
+# matches are held in process memory, so a second replica would serve a second, disconnected
+# lobby list and players would fail to find each other.
+
+services:
+  game:
+    build: .
+    image: embassy-run:latest
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8080"
+      # Optional. Leave unset to run with the Genesis perk switched off.
+      RF_GENESIS_ADDRESS: ${RF_GENESIS_ADDRESS:-}
+    # Reachable only from the proxy, never published straight to the internet.
+    expose:
+      - "8080"
+    networks:
+      - embassy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - game
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env to the hostname players will visit}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here. Losing this volume means re-issuing them, so keep it.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - embassy
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  embassy:

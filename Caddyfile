@@ -1,0 +1,21 @@
+# Automatic HTTPS for Embassy Run.
+#
+# Browser wallets need a secure context and the relay needs wss://, so TLS is not optional
+# here: a bare IP address will not work at all. Caddy obtains and renews a Let's Encrypt
+# certificate for $DOMAIN on its own, provided ports 80 and 443 reach this machine.
+#
+# reverse_proxy upgrades WebSockets transparently, so /relay needs no special handling. The
+# relay must stay on this same origin, because FriendSDK's sandbox allows connect-src 'self'.
+
+{$DOMAIN} {
+	# The game bundle is a few hundred KB of JavaScript, so compressing it is worthwhile.
+	# This applies to HTTP responses only and does not touch the upgraded WebSocket.
+	encode zstd gzip
+
+	reverse_proxy game:8080
+
+	log {
+		output stdout
+		format console
+	}
+}

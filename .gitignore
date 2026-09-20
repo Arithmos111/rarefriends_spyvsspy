@@ -5,3 +5,6 @@ vendor/
 *.tgz
 *.log
 .DS_Store
+
+# Local environment. Never commit this.
+.env

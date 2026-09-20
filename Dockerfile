@@ -15,6 +15,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# The checks use Playwright, the server never does. Without this, building the image would
+# download a Chromium build that is only ever dead weight in it.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 COPY package.json package-lock.json ./
 COPY scripts ./scripts
 COPY server ./server
@@ -22,7 +26,10 @@ COPY games ./games
 COPY tsconfig.json ./
 
 # Fetches, builds, packs and installs FriendSDK, then bundles the game into .build/game.
-RUN npm run setup && npm run build
+# Afterwards drop the dev dependencies: serving needs only the SDK, react and ws.
+RUN npm run setup \
+ && npm run build \
+ && npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
