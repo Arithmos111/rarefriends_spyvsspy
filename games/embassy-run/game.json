@@ -1,0 +1,12 @@
+{
+  "name": "Embassy Run",
+  "consumable": "Gadget Crate",
+  "price": "1000000000000000000",
+  "outcomes": [
+    { "name": "Standard Issue Kit", "chanceBps": 6000, "reward": "500000000000000000" },
+    { "name": "Demolition Kit", "chanceBps": 2500, "reward": "1000000000000000000" },
+    { "name": "Counter-Intel Kit", "chanceBps": 1200, "reward": "2000000000000000000" },
+    { "name": "Ghost Kit", "chanceBps": 250, "reward": "3000000000000000000" },
+    { "name": "Director's Kit", "chanceBps": 50, "reward": "8000000000000000000" }
+  ]
+}

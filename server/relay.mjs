@@ -1,0 +1,444 @@
+/**
+ * Lobby matchmaking and authoritative match hosting over a same-origin WebSocket.
+ *
+ * The relay attaches to the same HTTP server that serves the FriendSDK bundle, which is
+ * what lets the sandboxed game frame reach it: the SDK's child CSP allows connect-src
+ * 'self', and nothing else.
+ */
+import { WebSocketServer } from "ws";
+import { randomUUID } from "node:crypto";
+import {
+  INPUT_HZ, LOBBY_AUTOSTART_MS, LOBBY_IDLE_MS, LOBBY_MAX_PLAYERS, LOBBY_MIN_PLAYERS,
+  MATCH_SECONDS, PROTOCOL_VERSION, TICK_MS, TRAP_TYPES,
+} from "../games/embassy-run/shared/protocol.ts";
+import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "../games/embassy-run/shared/mansion.ts";
+import { isKnownKit, kitById } from "../games/embassy-run/shared/loadouts.ts";
+import { applyAction, applyInput, createMatch, dropPlayer, stepMatch } from "../games/embassy-run/shared/sim.ts";
+import { holdsGenesis, ownerOfFriend, rpcConfigSummary } from "./rpc.mjs";
+
+const CODENAMES = [
+  "FALCON", "VIPER", "MAGPIE", "OTTER", "JACKAL", "HERON", "KESTREL", "MARTEN",
+  "ORIOLE", "BADGER", "LYNX", "PLOVER", "SABLE", "TERN", "WEASEL", "CONDOR",
+];
+const MAX_MESSAGE_BYTES = 4096;
+const MESSAGES_PER_SECOND = 90;
+
+const now = () => Date.now();
+const code = () => Array.from({ length: 4 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
+
+export function createRelay({ log = console.log } = {}) {
+  /** @type {Map<string, any>} */ const players = new Map();
+  /** @type {Map<string, any>} */ const lobbies = new Map();
+  const wss = new WebSocketServer({ noServer: true });
+
+  const send = (player, message) => {
+    if (player.socket.readyState === 1) player.socket.send(JSON.stringify(message));
+  };
+  const fail = (player, message) => send(player, { t: "error", message });
+
+  const lobbySummary = lobby => ({
+    code: lobby.code, name: lobby.name, players: lobby.members.size, capacity: LOBBY_MAX_PLAYERS,
+    state: lobby.state, isPrivate: lobby.isPrivate,
+    host: players.get(lobby.hostId)?.codename ?? "—",
+  });
+
+  const publicLobbies = () => [...lobbies.values()]
+    .filter(lobby => !lobby.isPrivate && lobby.state !== "playing" && lobby.members.size < LOBBY_MAX_PLAYERS)
+    .sort((a, b) => b.members.size - a.members.size || a.createdAt - b.createdAt)
+    .slice(0, 30)
+    .map(lobbySummary);
+
+  const activeMatches = () => [...lobbies.values()].filter(lobby => lobby.state === "playing").length;
+
+  function sendLobbyList(player) {
+    send(player, { t: "lobby.list", lobbies: publicLobbies(), onlinePlayers: players.size, activeMatches: activeMatches() });
+  }
+
+  function broadcastLobbyList() {
+    for (const player of players.values()) if (!player.lobbyCode) sendLobbyList(player);
+  }
+
+  function lobbyState(lobby) {
+    return {
+      t: "lobby.state", code: lobby.code, name: lobby.name, isPrivate: lobby.isPrivate, state: lobby.state,
+      startsInMs: lobby.startsAt ? Math.max(0, lobby.startsAt - now()) : null,
+      members: [...lobby.members.entries()].map(([playerId, member]) => {
+        const player = players.get(playerId);
+        return {
+          playerId, codename: player?.codename ?? "—", friendId: player?.friendId ?? "0",
+          ready: member.ready, isHost: playerId === lobby.hostId, kitId: member.kitId,
+          genesis: player?.genesis ?? false,
+        };
+      }),
+    };
+  }
+
+  function broadcastLobby(lobby) {
+    const message = lobbyState(lobby);
+    for (const playerId of lobby.members.keys()) {
+      const player = players.get(playerId);
+      if (player) send(player, message);
+    }
+  }
+
+  function uniqueCodename(lobby, preferred) {
+    const taken = new Set([...lobby.members.keys()].map(id => players.get(id)?.codename).filter(Boolean));
+    if (!taken.has(preferred)) return preferred;
+    for (const name of CODENAMES) if (!taken.has(name)) return name;
+    return `${preferred}-${lobby.members.size + 1}`;
+  }
+
+  function joinLobby(player, lobby, kitId) {
+    if (lobby.state === "playing") return fail(player, "That match has already started.");
+    if (lobby.members.size >= LOBBY_MAX_PLAYERS) return fail(player, "That lobby is full.");
+    leaveLobby(player, { silent: true });
+    player.codename = uniqueCodename(lobby, player.codename);
+    lobby.members.set(player.playerId, { ready: false, kitId: isKnownKit(kitId) ? kitId : "field" });
+    lobby.lastActivity = now();
+    player.lobbyCode = lobby.code;
+    broadcastLobby(lobby);
+    broadcastLobbyList();
+  }
+
+  function leaveLobby(player, { silent = false } = {}) {
+    const lobby = lobbies.get(player.lobbyCode);
+    player.lobbyCode = null;
+    if (!lobby) return;
+    lobby.members.delete(player.playerId);
+    lobby.lastActivity = now();
+    if (lobby.match) dropPlayer(lobby.match, player.playerId);
+    if (lobby.hostId === player.playerId) lobby.hostId = [...lobby.members.keys()][0] ?? null;
+    if (lobby.members.size === 0 && lobby.state !== "playing") closeLobby(lobby);
+    else {
+      if (lobby.state === "starting" && lobby.members.size < LOBBY_MIN_PLAYERS) {
+        lobby.state = "waiting";
+        lobby.startsAt = null;
+      }
+      broadcastLobby(lobby);
+    }
+    if (!silent) send(player, { t: "lobby.left" });
+    broadcastLobbyList();
+  }
+
+  function closeLobby(lobby) {
+    if (lobby.timer) clearInterval(lobby.timer);
+    lobbies.delete(lobby.code);
+  }
+
+  function maybeAutoStart(lobby) {
+    const ready = [...lobby.members.values()].filter(member => member.ready).length;
+    const enough = lobby.members.size >= LOBBY_MIN_PLAYERS && ready === lobby.members.size;
+    if (enough && lobby.state === "waiting") {
+      lobby.state = "starting";
+      lobby.startsAt = now() + LOBBY_AUTOSTART_MS;
+    } else if (!enough && lobby.state === "starting") {
+      lobby.state = "waiting";
+      lobby.startsAt = null;
+    }
+    broadcastLobby(lobby);
+    broadcastLobbyList();
+  }
+
+  function startMatch(lobby) {
+    const roster = [...lobby.members.entries()].map(([playerId, member]) => {
+      const player = players.get(playerId);
+      return {
+        playerId, friendId: player?.friendId ?? "0", codename: player?.codename ?? "AGENT",
+        genesis: player?.genesis ?? false, kitId: member.kitId,
+      };
+    });
+    if (roster.length < LOBBY_MIN_PLAYERS) {
+      lobby.state = "waiting";
+      lobby.startsAt = null;
+      broadcastLobby(lobby);
+      return;
+    }
+    lobby.state = "playing";
+    lobby.startsAt = null;
+    lobby.match = createMatch((Math.random() * 0x7fffffff) | 0, roster, now());
+    lobby.lastTick = now();
+
+    const startMessage = {
+      t: "match.start",
+      roomNames: lobby.match.map.rooms.map(room => room.name),
+      gridW: 3, gridH: 3, exitRoom: lobby.match.map.exitRoom,
+      seed: lobby.match.seed,
+    };
+    for (const playerId of lobby.members.keys()) {
+      const player = players.get(playerId);
+      if (player) send(player, startMessage);
+    }
+    lobby.timer = setInterval(() => tickLobby(lobby), TICK_MS);
+    broadcastLobbyList();
+    log(`match started in lobby ${lobby.code} with ${roster.length} agents`);
+  }
+
+  function tickLobby(lobby) {
+    const at = now();
+    const delta = at - lobby.lastTick;
+    lobby.lastTick = at;
+    const match = lobby.match;
+    if (!match) return;
+    stepMatch(match, delta);
+
+    const batch = match.events.splice(0, match.events.length);
+    for (const playerId of lobby.members.keys()) {
+      const player = players.get(playerId);
+      if (!player) continue;
+      send(player, buildSnapshot(match, playerId));
+      const mine = batch.filter(event => !event.to || event.to === playerId)
+        .map(({ at: eventAt, text, tone }) => ({ at: eventAt, text, tone }));
+      if (mine.length) send(player, { t: "events", events: mine });
+    }
+
+    if (match.finished) endMatch(lobby);
+  }
+
+  function endMatch(lobby) {
+    const match = lobby.match;
+    if (lobby.timer) clearInterval(lobby.timer);
+    lobby.timer = null;
+    const results = scoreboard(match);
+    const winner = match.winner ? match.players.get(match.winner) : null;
+    const message = {
+      t: "match.end", winner: match.winner, winnerName: winner?.codename ?? null,
+      reason: match.endReason, results,
+    };
+    for (const playerId of lobby.members.keys()) {
+      const player = players.get(playerId);
+      if (player) send(player, message);
+      const member = lobby.members.get(playerId);
+      if (member) member.ready = false;
+    }
+    lobby.match = null;
+    lobby.state = "waiting";
+    lobby.lastActivity = now();
+    if (lobby.members.size === 0) closeLobby(lobby);
+    else broadcastLobby(lobby);
+    broadcastLobbyList();
+    log(`match ended in lobby ${lobby.code}: ${match.endReason}`);
+  }
+
+  function scoreboard(match) {
+    return [...match.players.values()]
+      .map(player => ({
+        playerId: player.playerId, codename: player.codename, friendId: player.friendId,
+        genesis: player.genesis, items: player.inventory.length, deaths: player.deaths,
+        connected: player.connected,
+      }))
+      .sort((a, b) => b.items - a.items || a.deaths - b.deaths);
+  }
+
+  function buildSnapshot(match, playerId) {
+    const self = match.players.get(playerId);
+    const room = match.map.rooms[self.room];
+    const detect = self.detector;
+    const actorOf = player => ({
+      playerId: player.playerId, friendId: player.friendId, codename: player.codename,
+      genesis: player.genesis, x: Math.round(player.x * 10) / 10, y: Math.round(player.y * 10) / 10,
+      facing: player.facing, walking: player.walking, hp: player.hp,
+      stunnedMs: Math.max(0, player.stunnedUntil - match.now),
+      attackingMs: Math.max(0, player.attackingUntil - match.now),
+      invulnerableMs: Math.max(0, player.invulnerableUntil - match.now),
+      busy: player.busy ? {
+        kind: player.busy.kind, furnitureId: player.busy.furnitureId,
+        progress: Math.min(1, (match.now - player.busy.startedAt) / Math.max(1, player.busy.endsAt - player.busy.startedAt)),
+      } : null,
+    });
+
+    return {
+      t: "snapshot", tick: match.tick, ackSeq: self.lastSeq,
+      secondsLeft: Math.max(0, Math.round((match.endsAt - match.now) / 1000)),
+      roomIndex: self.room, roomName: room.name, doors: room.doors,
+      exitHere: self.room === match.map.exitRoom,
+      self: {
+        ...actorOf(self),
+        inventory: [...self.inventory],
+        traps: Object.fromEntries(TRAP_TYPES.map(type => [type, self.traps[type] ?? 0])),
+        hasDetector: self.detector, hasLockpick: self.lockpick, hasDisarm: self.disarm,
+        respawnMs: Math.max(0, self.respawnAt ? self.respawnAt - match.now : 0),
+      },
+      actors: [...match.players.values()]
+        .filter(player => player.playerId !== playerId && player.room === self.room && player.respawnAt === 0)
+        .map(actorOf),
+      furniture: room.furniture.map(piece => {
+        const trap = match.traps.get(piece.id);
+        const mine = trap?.ownerId === playerId;
+        return {
+          id: piece.id, type: piece.type, x: piece.x, y: piece.y,
+          searched: piece.searched, emptied: piece.emptied,
+          trap: trap && (mine || detect) ? trap.type : null,
+          trapMine: Boolean(mine),
+        };
+      }),
+      drops: match.drops.filter(drop => drop.room === self.room)
+        .map(drop => ({ id: drop.id, item: drop.item, x: drop.x, y: drop.y })),
+      scoreboard: scoreboard(match),
+    };
+  }
+
+  async function handleHello(player, message) {
+    if (player.friendId) return;
+    if (message.protocol !== PROTOCOL_VERSION) {
+      fail(player, "This game build is out of date. Reload the page.");
+      player.socket.close();
+      return;
+    }
+    const friendId = String(message.friendId ?? "");
+    if (!/^[0-9]{1,78}$/.test(friendId) || BigInt(friendId) <= 0n) {
+      fail(player, "A verified Rare Friend is required to play.");
+      player.socket.close();
+      return;
+    }
+    player.friendId = friendId;
+    player.codename = typeof message.codename === "string" && /^[A-Z0-9-]{3,12}$/.test(message.codename)
+      ? message.codename
+      : CODENAMES[Math.floor(Math.random() * CODENAMES.length)];
+
+    // A real token check, plus the Genesis perk. Neither can block play if the RPC is down.
+    const owner = await ownerOfFriend(friendId).catch(() => null);
+    player.owner = owner;
+    player.genesis = owner ? await holdsGenesis(owner).catch(() => false) : false;
+
+    send(player, {
+      t: "hello.ok", playerId: player.playerId, codename: player.codename,
+      genesis: player.genesis, protocol: PROTOCOL_VERSION,
+    });
+    sendLobbyList(player);
+  }
+
+  function handleMessage(player, raw) {
+    let message;
+    try { message = JSON.parse(raw); } catch { return; }
+    if (!message || typeof message.t !== "string") return;
+
+    if (message.t === "hello") return void handleHello(player, message);
+    if (!player.friendId) return fail(player, "Identify your Rare Friend first.");
+    if (message.t === "ping") return send(player, { t: "pong", at: message.at });
+
+    const lobby = lobbies.get(player.lobbyCode);
+
+    switch (message.t) {
+      case "lobby.list": return sendLobbyList(player);
+
+      case "lobby.create": {
+        if (lobbies.size > 400) return fail(player, "The server is at capacity. Try again shortly.");
+        let newCode = code();
+        while (lobbies.has(newCode)) newCode = code();
+        const name = typeof message.name === "string" && message.name.trim()
+          ? message.name.trim().slice(0, 28) : `${player.codename}'s embassy`;
+        const created = {
+          code: newCode, name, isPrivate: Boolean(message.isPrivate), hostId: player.playerId,
+          members: new Map(), state: "waiting", startsAt: null, match: null, timer: null,
+          createdAt: now(), lastActivity: now(),
+        };
+        lobbies.set(newCode, created);
+        return joinLobby(player, created, message.kitId);
+      }
+
+      case "lobby.join": {
+        const target = lobbies.get(String(message.code ?? "").toUpperCase());
+        if (!target) return fail(player, "No lobby with that code.");
+        return joinLobby(player, target, message.kitId);
+      }
+
+      case "lobby.quick": {
+        const open = [...lobbies.values()]
+          .filter(entry => !entry.isPrivate && entry.state === "waiting" && entry.members.size < LOBBY_MAX_PLAYERS)
+          .sort((a, b) => b.members.size - a.members.size)[0];
+        if (open) return joinLobby(player, open, message.kitId);
+        return handleMessage(player, JSON.stringify({ t: "lobby.create", name: "Quick match", isPrivate: false, kitId: message.kitId }));
+      }
+
+      case "lobby.leave": return leaveLobby(player);
+
+      case "lobby.ready": {
+        if (!lobby) return;
+        const member = lobby.members.get(player.playerId);
+        if (!member || lobby.state === "playing") return;
+        member.ready = Boolean(message.ready);
+        lobby.lastActivity = now();
+        return maybeAutoStart(lobby);
+      }
+
+      case "lobby.kit": {
+        if (!lobby) return;
+        const member = lobby.members.get(player.playerId);
+        if (!member || lobby.state === "playing") return;
+        if (!isKnownKit(message.kitId)) return;
+        member.kitId = message.kitId;
+        return broadcastLobby(lobby);
+      }
+
+      case "lobby.start": {
+        if (!lobby || lobby.hostId !== player.playerId) return;
+        if (lobby.state === "playing") return;
+        if (lobby.members.size < LOBBY_MIN_PLAYERS) return fail(player, `Wait for at least ${LOBBY_MIN_PLAYERS} agents.`);
+        return startMatch(lobby);
+      }
+
+      case "input": {
+        if (!lobby?.match) return;
+        return applyInput(lobby.match, player.playerId, Number(message.seq) || 0, Number(message.dx) || 0, Number(message.dy) || 0);
+      }
+
+      case "action": {
+        if (!lobby?.match || !message.action || typeof message.action.kind !== "string") return;
+        return applyAction(lobby.match, player.playerId, message.action);
+      }
+    }
+  }
+
+  wss.on("connection", socket => {
+    const player = {
+      playerId: randomUUID(), socket, friendId: null, codename: null, genesis: false,
+      owner: null, lobbyCode: null, budget: MESSAGES_PER_SECOND, alive: true,
+    };
+    players.set(player.playerId, player);
+
+    socket.on("message", data => {
+      if (data.length > MAX_MESSAGE_BYTES) return;
+      if (player.budget-- <= 0) return;
+      try { handleMessage(player, data.toString()); } catch (error) { log(`message error: ${error.message}`); }
+    });
+    socket.on("pong", () => { player.alive = true; });
+    socket.on("close", () => {
+      leaveLobby(player, { silent: true });
+      players.delete(player.playerId);
+      broadcastLobbyList();
+    });
+    socket.on("error", () => {});
+  });
+
+  // Budget refill, autostart, idle lobby reclamation and dead-socket pruning.
+  const housekeeping = setInterval(() => {
+    for (const player of players.values()) {
+      player.budget = MESSAGES_PER_SECOND;
+      if (!player.alive) { player.socket.terminate(); continue; }
+      player.alive = false;
+      if (player.socket.readyState === 1) player.socket.ping();
+    }
+    const at = now();
+    for (const lobby of [...lobbies.values()]) {
+      if (lobby.state === "starting" && lobby.startsAt && at >= lobby.startsAt) startMatch(lobby);
+      if (lobby.members.size === 0 && at - lobby.lastActivity > LOBBY_IDLE_MS) closeLobby(lobby);
+    }
+  }, 1000);
+
+  return {
+    handleUpgrade(request, socket, head) {
+      wss.handleUpgrade(request, socket, head, ws => wss.emit("connection", ws, request));
+    },
+    stats() {
+      return { players: players.size, lobbies: lobbies.size, matches: activeMatches(), rpc: rpcConfigSummary() };
+    },
+    stop() {
+      clearInterval(housekeeping);
+      for (const lobby of lobbies.values()) if (lobby.timer) clearInterval(lobby.timer);
+      wss.close();
+    },
+  };
+}
+
+export const RELAY_PATH = "/relay";
+export { MATCH_SECONDS, INPUT_HZ, EXIT_RADIUS, EXIT_X, EXIT_Y, kitById };
