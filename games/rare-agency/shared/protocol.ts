@@ -430,6 +430,38 @@ export type ServerMessage =
   | { t: "error"; message: string }
   | { t: "pong"; at: number };
 
+/**
+ * Where a room's name plate hangs: which of the two visible walls, and where along it.
+ *
+ * Only the north and west walls face the camera. A plate over a doorway reads as a signpost
+ * pointing through it rather than as the name of the room you are standing in, so a wall with
+ * no doorway is preferred. The centre room has doorways on all four sides and three others
+ * have them on both visible walls, so in those cases the plate goes on the longer wall and
+ * sits beside the opening instead of over it, narrowed to fit the clear run.
+ *
+ * Shared by the renderer, which draws it, and by map generation, which keeps wall dressing
+ * and hangings clear of it. They must agree, or the plate collides with a portrait again.
+ */
+export function roomSignPlacement(doors: readonly Direction[]): {
+  onNorth: boolean; centre: number; width: number;
+} {
+  const northClear = !doors.includes("north");
+  const westClear = !doors.includes("west");
+  if (northClear || westClear) {
+    const onNorth = northClear;
+    const span = onNorth ? ROOM_W : ROOM_H;
+    return { onNorth, centre: span / 2, width: span * 0.52 };
+  }
+  // Both are pierced. The north wall is the longer of the two, so it leaves the wider run.
+  // The plate is centred in that run with equal margins, so it reads as hung beside the
+  // opening rather than crowded up against either it or the corner.
+  const span = ROOM_W;
+  const run = span / 2 - DOOR_HALF_WIDTH;
+  const margin = 24;
+  const width = Math.min(span * 0.52, run - margin * 2);
+  return { onNorth: true, centre: run / 2, width };
+}
+
 export const ROOM_NAMES: readonly string[] = Object.freeze([
   "Reception", "Cipher Room", "Ambassador's Study",
   "Records Vault", "Courtyard Gate", "Signals Room",

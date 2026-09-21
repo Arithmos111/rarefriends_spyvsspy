@@ -12,7 +12,7 @@ import { spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/spri
 import {
   ATTACK_WINDUP_MS, DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FURNITURE_FOOTPRINT, MISSION_ITEMS,
   PROP_SURFACES, ROOM_H, ROOM_PROPS, ROOM_W, type PropKind,
-  carryableLabel, isDoorTrapId, isWallMounted,
+  carryableLabel, isDoorTrapId, isWallMounted, roomSignPlacement,
   type Carryable, type DecorType, type Direction, type EffectKind, type FurnitureType,
   type MatchSnapshot, type RoomActor, type RoomDecor, type RoomTrap,
 } from "./shared/protocol.ts";
@@ -213,21 +213,17 @@ const WALL_HEIGHT = 105;
  * which is what sells the surface.
  */
 function drawRoomSign(context: CanvasRenderingContext2D, name: string, doors: readonly Direction[]): void {
-  // Hang it on whichever far wall is not interrupted by a doorway near its middle.
-  const onNorth = !doors.includes("north");
+  const { onNorth, centre: midU, width: plateU } = roomSignPlacement(doors);
   const label = name.toUpperCase();
 
   // u runs along the wall in world units and v runs down the plaster in pixels. Each wall
   // gets the origin and direction that keep the lettering reading left to right.
-  const span = onNorth ? ROOM_W : ROOM_H;
   const [ox, oy] = onNorth ? project(0, 0) : project(0, ROOM_H);
 
   context.save();
   context.translate(ox, oy);
   context.transform(AX, onNorth ? BY : -BY, 0, 1, 0, 0);
 
-  const plateU = span * 0.52;
-  const midU = span / 2;
   const height = 34;
   const top = -WALL_HEIGHT + 20;
 

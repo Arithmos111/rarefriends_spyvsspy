@@ -10,6 +10,7 @@ import {
   DECOR_TYPES, FURNITURE_FOOTPRINT, FURNITURE_TYPES, GRID_W, MISSION_ITEMS, PLAYER_RADIUS,
   ROOM_WALL_FURNITURE, isWallMounted,
   ROOM_COUNT, ROOM_FURNITURE, ROOM_H, ROOM_NAMES, ROOM_W, oppositeDirection, roomDoors,
+  roomSignPlacement,
   type Carryable, type DecorType, type Direction, type FurnitureType, type RoomDecor,
 } from "./protocol.ts";
 
@@ -79,22 +80,28 @@ const WALL_DECOR: readonly DecorType[] = Object.freeze(["banner", "flag"]);
 const FLOOR_DECOR: readonly DecorType[] = Object.freeze(["rug", "lamp", "bookshelf"]);
 
 /**
- * Wall anchors far enough from the room name plate to leave it readable.
+ * Clearance between the edge of the room name plate and the nearest wall anchor.
  *
- * The plate hangs at the middle of whichever far wall has no doorway, which is exactly where
- * some of these anchors sit. Screen separation along a wall is AX * the world distance, so a
- * clearance of 130 world units keeps even the longest room name clear of a hanging.
+ * Measured from the plate's edge, not its centre: the plate is not always centred, and its
+ * width varies with the room. A hanging is about 26 world units across, so 34 keeps the two
+ * visibly apart along the wall.
  */
-const SIGN_CLEARANCE = 130;
+const SIGN_CLEARANCE = 34;
 
-/** True when a wall anchor is far enough along its wall to leave the name plate readable. */
+/**
+ * True when a wall anchor leaves the room's name plate readable.
+ *
+ * The plate is not always centred: in rooms with doorways on both visible walls it is shifted
+ * beside the opening. Both sides ask roomSignPlacement where it actually is, so the clearance
+ * follows the plate rather than assuming the middle of the wall.
+ */
 function clearOfSign(spot: readonly [number, number], doors: readonly Direction[]): boolean {
-  const onNorth = !doors.includes("north");
+  const plate = roomSignPlacement(doors);
   const [x, y] = spot;
-  // The plate is centred on the wall it hangs on; measure along that wall only.
-  return onNorth
-    ? y !== 0 || Math.abs(x - ROOM_W / 2) >= SIGN_CLEARANCE
-    : x !== 0 || Math.abs(y - ROOM_H / 2) >= SIGN_CLEARANCE;
+  const onSignWall = plate.onNorth ? y === 0 : x === 0;
+  if (!onSignWall) return true;
+  const along = plate.onNorth ? x : y;
+  return Math.abs(along - plate.centre) >= plate.width / 2 + SIGN_CLEARANCE;
 }
 
 function wallSpotsClearOfSign(doors: readonly Direction[]): readonly number[] {

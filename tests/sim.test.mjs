@@ -635,24 +635,39 @@ test("every furniture type has a footprint, a label and appears somewhere", () =
   }
 });
 
-test("wall dressing never overlaps the room name plate", () => {
-  // The plate hangs at the middle of whichever far wall has no doorway. Screen separation
-  // along a wall is proportional to world separation, so this is checked in world units.
-  const CLEAR = 130;
-  for (const seed of [1, 7, 20260920, 99991]) {
-    const embassy = map.createMap(seed);
-    for (const room of embassy.rooms) {
-      const onNorth = !room.doors.includes("north");
-      for (const piece of room.decor) {
-        const onSignWall = onNorth ? piece.y === 0 : piece.x === 0;
-        if (!onSignWall) continue;
-        const gap = onNorth
-          ? Math.abs(piece.x - P.ROOM_W / 2)
-          : Math.abs(piece.y - P.ROOM_H / 2);
-        assert.ok(gap >= CLEAR,
-          `${P.ROOM_NAMES[room.index]}: a ${piece.type} sits ${gap} from the name plate`);
+test("wall dressing and hangings never overlap the room name plate", () => {
+  // The plate is not always centred: where both visible walls are pierced by doorways it is
+  // shifted beside the opening. Ask for its actual placement rather than assuming the middle.
+  for (const seed of [1, 7, 42, 20260920, 99991]) {
+    for (const room of map.createMap(seed).rooms) {
+      const plate = P.roomSignPlacement(room.doors);
+      const onPlateWall = spot => (plate.onNorth ? spot.y === 0 : spot.x === 0);
+      const along = spot => (plate.onNorth ? spot.x : spot.y);
+      for (const spot of [...room.decor, ...room.furniture.filter(p => P.isWallMounted(p.type))]) {
+        if (!onPlateWall(spot)) continue;
+        const gap = Math.abs(along(spot) - plate.centre) - plate.width / 2;
+        assert.ok(gap > 0,
+          `seed ${seed}: something sits under the plate in ${P.ROOM_NAMES[room.index]}`);
       }
     }
+  }
+});
+
+test("the room name plate never hangs over a doorway", () => {
+  // A plate over an opening reads as a signpost pointing through it, not as the name of the
+  // room you are standing in.
+  for (let index = 0; index < 9; index++) {
+    const doors = P.roomDoors(index);
+    const plate = P.roomSignPlacement(doors);
+    const wall = plate.onNorth ? "north" : "west";
+    if (!doors.includes(wall)) continue;
+    const span = plate.onNorth ? P.ROOM_W : P.ROOM_H;
+    const doorLow = span / 2 - P.DOOR_HALF_WIDTH;
+    const doorHigh = span / 2 + P.DOOR_HALF_WIDTH;
+    const low = plate.centre - plate.width / 2;
+    const high = plate.centre + plate.width / 2;
+    assert.ok(high <= doorLow || low >= doorHigh,
+      `${P.ROOM_NAMES[index]}: the plate spans ${low.toFixed(0)}..${high.toFixed(0)} across a doorway at ${doorLow}..${doorHigh}`);
   }
 });
 
