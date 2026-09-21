@@ -19,7 +19,8 @@ test("map generation is deterministic and fully walkable", () => {
   assert.equal(JSON.stringify(map.createMap(31337)), JSON.stringify(map.createMap(31337)));
   assert.notEqual(JSON.stringify(map.createMap(1)), JSON.stringify(map.createMap(2)));
   for (const room of map.createMap(31337).rooms) {
-    assert.equal(room.furniture.length, 5);
+    const standing = room.furniture.filter(piece => !P.isWallMounted(piece.type));
+    assert.equal(standing.length, 5, `room ${room.index} should stand five pieces on the floor`);
     assert.ok(!map.blockedByFurniture(room, P.ROOM_W / 2, P.ROOM_H / 2), `centre blocked in room ${room.index}`);
     for (const direction of room.doors) {
       const point = map.doorEntryPoint(direction);
@@ -596,8 +597,8 @@ test("every room is furnished only from its own palette", () => {
   for (const seed of [1, 7, 20260920, 99991]) {
     const embassy = map.createMap(seed);
     for (const room of embassy.rooms) {
-      const allowed = P.ROOM_FURNITURE[room.index];
-      assert.ok(allowed, `room ${room.index} should have a furniture palette`);
+      const allowed = [...P.ROOM_FURNITURE[room.index], ...P.ROOM_WALL_FURNITURE[room.index]];
+      assert.ok(P.ROOM_FURNITURE[room.index], `room ${room.index} should have a furniture palette`);
       for (const piece of room.furniture) {
         assert.ok(allowed.includes(piece.type),
           `${P.ROOM_NAMES[room.index]} should not contain a ${piece.type}`);
@@ -610,7 +611,8 @@ test("a room's furniture is varied rather than five of the same thing", () => {
   for (const seed of [1, 7, 20260920, 99991]) {
     const embassy = map.createMap(seed);
     for (const room of embassy.rooms) {
-      const kinds = new Set(room.furniture.map(piece => piece.type));
+      const kinds = new Set(room.furniture
+        .filter(piece => !P.isWallMounted(piece.type)).map(piece => piece.type));
       assert.ok(kinds.size >= 4,
         `${P.ROOM_NAMES[room.index]} has only ${kinds.size} kinds of furniture on seed ${seed}`);
     }
@@ -655,12 +657,15 @@ test("wall dressing never overlaps the room name plate", () => {
 test("furniture never clips other furniture, and every room is fully furnished", () => {
   for (let seed = 1; seed <= 120; seed++) {
     for (const room of map.createMap(seed).rooms) {
-      assert.equal(room.furniture.length, 5,
-        `${P.ROOM_NAMES[room.index]} on seed ${seed} has ${room.furniture.length} pieces`);
-      for (let i = 0; i < room.furniture.length; i++) {
-        for (let j = i + 1; j < room.furniture.length; j++) {
-          const a = room.furniture[i];
-          const b = room.furniture[j];
+      // Wall pieces hang above head height and are excluded: they legitimately overlap the
+      // footprint of anything standing against the same wall.
+      const standing = room.furniture.filter(piece => !P.isWallMounted(piece.type));
+      assert.equal(standing.length, 5,
+        `${P.ROOM_NAMES[room.index]} on seed ${seed} has ${standing.length} standing pieces`);
+      for (let i = 0; i < standing.length; i++) {
+        for (let j = i + 1; j < standing.length; j++) {
+          const a = standing[i];
+          const b = standing[j];
           const fa = P.FURNITURE_FOOTPRINT[a.type];
           const fb = P.FURNITURE_FOOTPRINT[b.type];
           const apart = Math.abs(a.x - b.x) >= (fa.w + fb.w) / 2
@@ -749,4 +754,108 @@ test("a doorway trap is visible from both rooms, marked on the viewer's own wall
   assert.ok(across, "the same opening should be visible from the far side");
   assert.equal(across.direction, "west", "marked on that room's own west wall");
   assert.equal(across.targetId, here.targetId, "and it is the same trap, not a second one");
+});
+
+// --- Clocks and portraits on the wall ----------------------------------------------------
+
+test("every room hangs something searchable on its wall", () => {
+  for (const seed of [1, 7, 20260920, 99991]) {
+    for (const room of map.createMap(seed).rooms) {
+      const hanging = room.furniture.filter(piece => P.isWallMounted(piece.type));
+      assert.ok(hanging.length >= 1,
+        `${P.ROOM_NAMES[room.index]} on seed ${seed} hangs nothing`);
+      for (const piece of hanging) {
+        assert.ok(piece.x === 0 || piece.y === 0,
+          `a ${piece.type} should hang on one of the two visible walls`);
+      }
+    }
+  }
+});
+
+test("a hanging can be searched, and yields what it hides", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const agent = match.players.get("a");
+  const room = match.map.rooms[0];
+  const hanging = room.furniture.find(piece => P.isWallMounted(piece.type));
+  assert.ok(hanging, "room 0 should hang something");
+  hanging.contents = "documents";
+
+  agent.room = 0;
+  agent.x = hanging.x === 0 ? 40 : hanging.x;
+  agent.y = hanging.y === 0 ? 40 : hanging.y;
+  sim.applyAction(match, "a", { kind: "search", furnitureId: hanging.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.deepEqual(agent.inventory, ["documents"], "searching a hanging should yield its contents");
+  assert.equal(hanging.searched, true);
+});
+
+test("a hanging can be trapped, and the trap fires on whoever searches it", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const planter = match.players.get("a");
+  const victim = match.players.get("b");
+  const room = match.map.rooms[0];
+  const hanging = room.furniture.find(piece => P.isWallMounted(piece.type));
+
+  const standAtHanging = player => {
+    player.room = 0;
+    player.x = hanging.x === 0 ? 40 : hanging.x;
+    player.y = hanging.y === 0 ? 40 : hanging.y;
+  };
+
+  standAtHanging(planter);
+  sim.applyAction(match, "a", { kind: "plant", targetId: hanging.id, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+  assert.equal(match.traps.get(hanging.id)?.type, "bomb", "a portrait should take a trap");
+  planter.room = 8;
+
+  standAtHanging(victim);
+  victim.invulnerableUntil = 0;
+  sim.applyAction(match, "b", { kind: "search", furnitureId: hanging.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.equal(victim.hp, 0, "the trap behind the portrait should fire");
+  assert.equal(planter.takedowns, 1);
+});
+
+test("hangings never block movement themselves", () => {
+  for (const seed of [1, 7, 20260920]) {
+    for (const room of map.createMap(seed).rooms) {
+      for (const piece of room.furniture) {
+        if (!P.isWallMounted(piece.type)) continue;
+        // A room containing only this hanging: anything else standing nearby is its own
+        // obstacle, and is not what this is checking.
+        const alone = { ...room, furniture: [piece] };
+        const x = piece.x === 0 ? P.PLAYER_RADIUS + 1 : piece.x;
+        const y = piece.y === 0 ? P.PLAYER_RADIUS + 1 : piece.y;
+        assert.ok(!map.blockedByFurniture(alone, x, y),
+          `a ${piece.type} in ${P.ROOM_NAMES[room.index]} blocks the floor beneath it`);
+      }
+    }
+  }
+});
+
+test("every hanging has somewhere walkable to stand and search it from", () => {
+  // The real question is not whether the ideal spot is free, but whether any free spot is in
+  // reach — a bookcase can legitimately stand under a portrait.
+  for (const seed of [1, 7, 20260920, 99991]) {
+    for (const room of map.createMap(seed).rooms) {
+      for (const piece of room.furniture) {
+        if (!P.isWallMounted(piece.type)) continue;
+        let reachable = false;
+        for (let step = 0; step < 64 && !reachable; step++) {
+          const angle = (step / 64) * Math.PI * 2;
+          for (const distance of [24, 40, 56, 70]) {
+            const x = piece.x + Math.cos(angle) * distance;
+            const y = piece.y + Math.sin(angle) * distance;
+            if (!map.insideRoom(x, y)) continue;
+            if (map.blockedByFurniture(room, x, y)) continue;
+            if (Math.hypot(piece.x - x, piece.y - y) > P.INTERACT_RANGE) continue;
+            reachable = true;
+            break;
+          }
+        }
+        assert.ok(reachable,
+          `seed ${seed}: the ${piece.type} in ${P.ROOM_NAMES[room.index]} cannot be reached`);
+      }
+    }
+  }
 });

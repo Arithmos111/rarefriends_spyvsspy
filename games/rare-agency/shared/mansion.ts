@@ -8,6 +8,7 @@
  */
 import {
   DECOR_TYPES, FURNITURE_FOOTPRINT, FURNITURE_TYPES, GRID_W, MISSION_ITEMS, PLAYER_RADIUS,
+  ROOM_WALL_FURNITURE, isWallMounted,
   ROOM_COUNT, ROOM_FURNITURE, ROOM_H, ROOM_NAMES, ROOM_W, oppositeDirection, roomDoors,
   type Carryable, type DecorType, type Direction, type FurnitureType, type RoomDecor,
 } from "./protocol.ts";
@@ -63,7 +64,18 @@ const WALL_SPOTS: readonly (readonly [number, number])[] = Object.freeze([
 const FLOOR_SPOTS: readonly (readonly [number, number])[] = Object.freeze([
   [260, 200], [150, 240], [370, 240], [260, 300],
 ]);
-const WALL_DECOR: readonly DecorType[] = Object.freeze(["portrait", "banner", "clock", "flag"]);
+/**
+ * Where a clock or a portrait can hang: the two walls the camera shows, away from the
+ * doorway thresholds in the middle of each. Slots 12 and up, so they never collide with the
+ * floor slots above or the doorway ids at 80 and up.
+ */
+const WALL_FURNITURE_SPOTS: readonly (readonly [number, number])[] = Object.freeze([
+  [150, 0], [370, 0], [0, 86], [0, 274],
+]);
+const WALL_FURNITURE_SLOT_BASE = 12;
+
+/** Hangings are pure dressing now that clocks and portraits are searchable furniture. */
+const WALL_DECOR: readonly DecorType[] = Object.freeze(["banner", "flag"]);
 const FLOOR_DECOR: readonly DecorType[] = Object.freeze(["rug", "lamp", "bookshelf"]);
 
 /**
@@ -74,15 +86,20 @@ const FLOOR_DECOR: readonly DecorType[] = Object.freeze(["rug", "lamp", "bookshe
  * clearance of 130 world units keeps even the longest room name clear of a hanging.
  */
 const SIGN_CLEARANCE = 130;
-function wallSpotsClearOfSign(doors: readonly Direction[]): readonly number[] {
+
+/** True when a wall anchor is far enough along its wall to leave the name plate readable. */
+function clearOfSign(spot: readonly [number, number], doors: readonly Direction[]): boolean {
   const onNorth = !doors.includes("north");
-  return WALL_SPOTS.map((_, index) => index).filter(index => {
-    const [x, y] = WALL_SPOTS[index];
-    // The plate is centred on the wall it hangs on; measure along that wall only.
-    return onNorth
-      ? y !== 0 || Math.abs(x - ROOM_W / 2) >= SIGN_CLEARANCE
-      : x !== 0 || Math.abs(y - ROOM_H / 2) >= SIGN_CLEARANCE;
-  });
+  const [x, y] = spot;
+  // The plate is centred on the wall it hangs on; measure along that wall only.
+  return onNorth
+    ? y !== 0 || Math.abs(x - ROOM_W / 2) >= SIGN_CLEARANCE
+    : x !== 0 || Math.abs(y - ROOM_H / 2) >= SIGN_CLEARANCE;
+}
+
+function wallSpotsClearOfSign(doors: readonly Direction[]): readonly number[] {
+  return WALL_SPOTS.map((_, index) => index)
+    .filter(index => clearOfSign(WALL_SPOTS[index], doors));
 }
 
 function decorFor(random: () => number, doors: readonly Direction[]): RoomDecor[] {
@@ -165,6 +182,25 @@ export function createMap(seed: number): EmbassyMap {
         contents: null, searched: false, emptied: false,
       });
     }
+    // Hangings go up after the floor is furnished, on anchors clear of the name plate and of
+    // each other. They do not compete for floor slots, so a room gets both.
+    const hangings = ROOM_WALL_FURNITURE[index] ?? [];
+    const wallOrder = WALL_FURNITURE_SPOTS.map((_, slot) => slot)
+      .filter(slot => clearOfSign(WALL_FURNITURE_SPOTS[slot], roomDoors(index)));
+    for (let i = wallOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [wallOrder[i], wallOrder[j]] = [wallOrder[j], wallOrder[i]];
+    }
+    hangings.forEach((type, pick) => {
+      const slot = wallOrder[pick];
+      if (slot === undefined) return;
+      const [x, y] = WALL_FURNITURE_SPOTS[slot];
+      furniture.push({
+        id: index * 100 + WALL_FURNITURE_SLOT_BASE + slot, slot: WALL_FURNITURE_SLOT_BASE + slot,
+        type, x, y, contents: null, searched: false, emptied: false,
+      });
+    });
+
     furniture.sort((a, b) => a.id - b.id);
     rooms.push({
       index, name: ROOM_NAMES[index] ?? `Room ${index + 1}`, doors: roomDoors(index),
@@ -212,6 +248,8 @@ export function findFurniture(map: EmbassyMap, furnitureId: number): Furniture |
 /** True when a circle of PLAYER_RADIUS at (x, y) overlaps furniture in this room. */
 export function blockedByFurniture(room: Room, x: number, y: number, radius = PLAYER_RADIUS): boolean {
   for (const piece of room.furniture) {
+    // A clock or a portrait hangs above head height; you walk under it.
+    if (isWallMounted(piece.type)) continue;
     const { w, h } = FURNITURE_FOOTPRINT[piece.type];
     const nearestX = Math.max(piece.x - w / 2, Math.min(x, piece.x + w / 2));
     const nearestY = Math.max(piece.y - h / 2, Math.min(y, piece.y + h / 2));

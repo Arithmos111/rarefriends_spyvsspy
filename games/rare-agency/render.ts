@@ -12,7 +12,7 @@ import { spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/spri
 import {
   ATTACK_WINDUP_MS, DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FURNITURE_FOOTPRINT, MISSION_ITEMS,
   ROOM_H, ROOM_W,
-  carryableLabel, isDoorTrapId,
+  carryableLabel, isDoorTrapId, isWallMounted,
   type Carryable, type DecorType, type Direction, type EffectKind, type FurnitureType,
   type MatchSnapshot, type RoomActor, type RoomDecor, type RoomTrap,
 } from "./shared/protocol.ts";
@@ -120,6 +120,15 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
     drawTrapMarker(context, anchor.x, anchor.y, 6, trap, timeMs, reducedMotion);
   }
 
+  // Hangings live on the wall plane, so they draw with the walls rather than being sorted
+  // among the floor pieces. A trap on one is marked here too, for the same reason.
+  const wallTraps = new Map(snapshot.traps.map(trap => [trap.targetId, trap]));
+  for (const piece of snapshot.furniture) {
+    if (!isWallMounted(piece.type)) continue;
+    drawWallFurniture(context, piece, wallTraps.get(piece.id) ?? null,
+      piece.id === input.nearestFurnitureId, timeMs, reducedMotion);
+  }
+
   type Layer = { depth: number; draw: () => void };
   const layers: Layer[] = [];
 
@@ -132,6 +141,7 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
 
   const trapByTarget = new Map(snapshot.traps.map(trap => [trap.targetId, trap]));
   for (const piece of snapshot.furniture) {
+    if (isWallMounted(piece.type)) continue;
     const trap = trapByTarget.get(piece.id) ?? null;
     layers.push({
       depth: depthOf(piece.x, piece.y),
@@ -456,6 +466,8 @@ function isoBox(context: CanvasRenderingContext2D, x: number, y: number, w: numb
 const FURNITURE_HEIGHT: Record<FurnitureType, number> = {
   safe: 48, desk: 34, cabinet: 62, crate: 50, locker: 70, console: 40, planter: 54, painting: 52,
   table: 32, bookcase: 74, barrel: 46, bench: 26,
+  // Wall pieces: how far the hanging drops below the top of the wall.
+  wallclock: 44, wallart: 52,
 };
 
 /** Shades shared by every carcass, dimmed once a piece has been turned out. */
@@ -533,6 +545,15 @@ function drawFurniture(
   const shade = carcass(piece.emptied);
   const [sx, sy] = project(piece.x, piece.y);
   const { x, y } = piece;
+
+  // A contact shadow, so a piece sits on the floor instead of hovering over it. Drawn from
+  // the footprint, so a table casts a table-shaped patch and a barrel a round one.
+  context.save();
+  context.fillStyle = "rgba(20, 24, 15, 0.16)";
+  context.beginPath();
+  context.ellipse(sx, sy + 3, (w / 2) * AX * 1.02, (h / 2) * BY * 1.35, 0, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
 
   context.save();
   switch (piece.type) {
@@ -832,6 +853,105 @@ function drawFurniture(
     context.stroke();
     context.restore();
   }
+}
+
+/**
+ * A clock or a portrait hanging on a wall.
+ *
+ * Drawn flat against the wall plane rather than as an isometric box, and skewed to sit in it:
+ * the north wall recedes one way, the west wall the other. These are searchable and trappable
+ * like any other furniture, which is the point of them — a wall safe behind a portrait is the
+ * oldest hiding place in the business.
+ */
+function drawWallFurniture(
+  context: CanvasRenderingContext2D,
+  piece: MatchSnapshot["furniture"][number],
+  trap: RoomTrap | null,
+  highlighted: boolean,
+  timeMs: number,
+  reducedMotion: boolean,
+): void {
+  const onNorth = piece.y === 0;
+  const [sx, sy] = project(piece.x, piece.y);
+  const { w } = FURNITURE_FOOTPRINT[piece.type];
+  const drop = FURNITURE_HEIGHT[piece.type];
+  const top = sy - WALL_HEIGHT + 26;
+  const shade = carcass(piece.emptied);
+
+  context.save();
+  context.translate(sx, top);
+  // Shear into the wall's plane. BY/AX is the run of one wall unit across the screen.
+  context.transform(1, onNorth ? BY / AX : -BY / AX, 0, 1, 0, 0);
+  context.strokeStyle = INK;
+  context.lineWidth = 2;
+
+  if (piece.type === "wallclock") {
+    const r = w * 0.42;
+    context.fillStyle = shade.right;
+    context.beginPath();
+    context.arc(0, drop / 2, r, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = INK;
+    for (let tick = 0; tick < 12; tick++) {
+      const angle = (tick / 12) * Math.PI * 2;
+      context.fillRect(Math.cos(angle) * (r - 5) - 1, drop / 2 + Math.sin(angle) * (r - 5) - 1, 2, 2);
+    }
+    if (!piece.emptied) {
+      // Hands frozen at a plausible hour; they are scenery, not a clock.
+      context.lineWidth = 2.5;
+      context.beginPath();
+      context.moveTo(0, drop / 2);
+      context.lineTo(0, drop / 2 - r * 0.6);
+      context.moveTo(0, drop / 2);
+      context.lineTo(r * 0.45, drop / 2 + r * 0.2);
+      context.stroke();
+    }
+  } else {
+    // A framed portrait: frame, mount, and a head-and-shoulders silhouette.
+    const halfW = w * 0.42;
+    context.fillStyle = shade.right;
+    context.beginPath();
+    context.roundRect(-halfW, 0, halfW * 2, drop, 3);
+    context.fill();
+    context.stroke();
+    context.fillStyle = piece.emptied ? "#8d967a" : "#e9edda";
+    context.fillRect(-halfW + 6, 6, halfW * 2 - 12, drop - 12);
+    context.strokeRect(-halfW + 6, 6, halfW * 2 - 12, drop - 12);
+    if (!piece.emptied) {
+      context.fillStyle = WALL_DARK;
+      context.beginPath();
+      context.arc(0, drop * 0.38, halfW * 0.34, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.moveTo(-halfW * 0.5, drop - 8);
+      context.quadraticCurveTo(0, drop * 0.5, halfW * 0.5, drop - 8);
+      context.fill();
+    }
+  }
+  context.restore();
+
+  if (piece.emptied) {
+    context.save();
+    context.fillStyle = "rgba(20, 24, 15, 0.5)";
+    context.font = "600 10px ui-monospace, monospace";
+    context.textAlign = "center";
+    context.fillText("SEARCHED", sx, top + drop + 13);
+    context.restore();
+  }
+
+  if (highlighted) {
+    context.save();
+    context.strokeStyle = SIGNAL;
+    context.lineWidth = 3;
+    context.beginPath();
+    context.roundRect(sx - w * 0.5, top - 6, w, drop + 12, 6);
+    context.stroke();
+    context.restore();
+  }
+
+  // The pennant sits above the hanging, on the wall, not on the floor beneath it.
+  if (trap) drawTrapMarker(context, piece.x, piece.y, WALL_HEIGHT - 16, trap, timeMs, reducedMotion);
 }
 
 /** The four screen corners of a box face, for detail that is not axis-aligned. */
@@ -1698,14 +1818,23 @@ export function drawEscapeScene(
   context.stroke();
   context.setLineDash([]);
 
-  // The aircraft taxis in, waits, then climbs away.
-  const planeX = t < 0.55 ? -260 + t * (900 / 0.55) : 640 + (t - 0.55) * 1500;
-  const planeY = t < 0.72 ? horizon - 40 : horizon - 40 - (t - 0.72) * 900;
-  drawPlane(context, planeX, planeY, options.reducedMotion ? 0 : options.timeMs);
+  // The aircraft taxis in, holds while the agent boards, then climbs away up the frame
+  // rather than straight off the side. Leaving sideways at speed emptied the apron for the
+  // last second and a half, so the payoff ended on nothing.
+  const TAXI_END = 0.46;
+  const ROLL_START = 0.62;
+  const roll = Math.max(0, (t - ROLL_START) / (1 - ROLL_START));
+  const planeX = t < TAXI_END
+    ? -300 + (t / TAXI_END) * 780
+    : 480 + roll * roll * 430;
+  const planeY = horizon - 40 - roll * roll * 300;
+  // Receding as it climbs, so it reads as distance rather than as a sprite sliding away.
+  const planeScale = 1 - roll * 0.55;
+  drawPlane(context, planeX, planeY, options.reducedMotion ? 0 : options.timeMs, planeScale);
 
-  // The agent sprints on, boards, and is gone.
-  if (t < 0.7) {
-    const runX = 120 + t * 640;
+  // The agent sprints on and boards just as the roll begins.
+  if (t < ROLL_START) {
+    const runX = 90 + Math.min(1, t / (ROLL_START - 0.02)) * 380;
     const bob = options.reducedMotion ? 0 : Math.abs(Math.sin(options.timeMs / 90)) * 5;
     drawEscapeAgent(context, runX, horizon + 96 - bob, options.sprites, options.timeMs, options.reducedMotion);
   }
@@ -1725,9 +1854,12 @@ export function drawEscapeScene(
   context.restore();
 }
 
-function drawPlane(context: CanvasRenderingContext2D, x: number, y: number, timeMs: number): void {
+function drawPlane(
+  context: CanvasRenderingContext2D, x: number, y: number, timeMs: number, scale = 1,
+): void {
   context.save();
   context.translate(x, y);
+  context.scale(scale, scale);
   context.fillStyle = PAPER;
   context.strokeStyle = INK;
   context.lineWidth = 3;

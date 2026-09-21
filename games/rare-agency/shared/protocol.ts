@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -114,13 +114,26 @@ export const TRAP_IS_LETHAL: Readonly<Record<TrapType, boolean>> = Object.freeze
 export const FURNITURE_TYPES = [
   "safe", "desk", "cabinet", "crate", "locker", "console", "planter", "painting",
   "table", "bookcase", "barrel", "bench",
+  /** Hung on a wall rather than standing on the floor. See WALL_MOUNTED. */
+  "wallclock", "wallart",
 ] as const;
 export type FurnitureType = typeof FURNITURE_TYPES[number];
 export const FURNITURE_LABELS: Readonly<Record<FurnitureType, string>> = Object.freeze({
   safe: "Wall safe", desk: "Writing desk", cabinet: "Filing cabinet", crate: "Supply crate",
   locker: "Steel locker", console: "Comms console", planter: "Planter", painting: "Framed painting",
   table: "Meeting table", bookcase: "Bookcase", barrel: "Wine barrel", bench: "Bench",
+  wallclock: "Wall clock", wallart: "Framed portrait",
 });
+
+/**
+ * Furniture that hangs on a wall instead of standing on the floor.
+ *
+ * These are searched and trapped like anything else — a safe behind a portrait is the oldest
+ * trick there is — but they do not block movement, and they are drawn flat against the wall
+ * rather than sorted among the floor pieces.
+ */
+export const WALL_MOUNTED: ReadonlySet<FurnitureType> = new Set<FurnitureType>(["wallclock", "wallart"]);
+export const isWallMounted = (type: FurnitureType): boolean => WALL_MOUNTED.has(type);
 
 /**
  * World-space collision footprint per furniture type, centred on its anchor.
@@ -133,6 +146,8 @@ export const FURNITURE_FOOTPRINT: Readonly<Record<FurnitureType, Readonly<{ w: n
   safe: { w: 52, h: 40 }, desk: { w: 82, h: 50 }, cabinet: { w: 54, h: 44 }, crate: { w: 58, h: 58 },
   locker: { w: 50, h: 42 }, console: { w: 74, h: 46 }, planter: { w: 46, h: 46 }, painting: { w: 60, h: 26 },
   table: { w: 86, h: 58 }, bookcase: { w: 66, h: 38 }, barrel: { w: 48, h: 48 }, bench: { w: 76, h: 34 },
+  // Wall pieces never collide, so these bound reach and the gap between hangings only.
+  wallclock: { w: 44, h: 16 }, wallart: { w: 52, h: 16 },
 });
 
 /**
@@ -150,6 +165,19 @@ export const ROOM_FURNITURE: readonly (readonly FurnitureType[])[] = Object.free
   ["crate", "locker", "bench", "cabinet", "barrel"],        // Servants' Stair
   ["barrel", "crate", "bookcase", "locker", "bench"],       // Wine Cellar
   ["table", "painting", "planter", "bookcase", "bench"],    // Great Hall
+]);
+
+/** What hangs on each room's walls. Drawn from separately, at wall anchors. */
+export const ROOM_WALL_FURNITURE: readonly (readonly FurnitureType[])[] = Object.freeze([
+  ["wallclock", "wallart"],  // Reception
+  ["wallclock"],             // Cipher Room
+  ["wallart", "wallart"],    // Ambassador's Study
+  ["wallclock"],             // Records Vault
+  ["wallclock"],             // Courtyard Gate
+  ["wallclock", "wallart"],  // Signals Room
+  ["wallart"],               // Servants' Stair
+  ["wallart"],               // Wine Cellar
+  ["wallart", "wallart"],    // Great Hall
 ]);
 
 /** Purely decorative room dressing. Drawn from the map seed, never collidable. */

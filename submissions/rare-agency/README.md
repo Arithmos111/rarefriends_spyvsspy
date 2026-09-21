@@ -36,7 +36,7 @@ Move with WASD, arrow keys, the on-screen stick, or by tapping a destination. **
 
 Nine rooms in a 3×3 block. You see only the room you are standing in, so rivals are invisible until you walk in on them. Four items — secret documents, a forged passport, bearer bonds and a disguise kit — are each hidden in one piece of furniture in four different rooms. Searching takes 0.9s, or 0.55s with a lockpick.
 
-Set a trap inside any untrapped furniture, or rig a doorway — a doorway is one opening shared by two rooms, so a trap on it fires on anyone crossing it in either direction, from either side. Letter bombs and spring traps take the victim out; a water bucket freezes them for 3 seconds. **Your own traps are live against you**, and catching yourself is nobody's takedown. A disarm tool recovers any trap, including your own.
+Every room also hangs a wall clock or a framed portrait, searchable and trappable like anything else. Set a trap inside any untrapped furniture, or rig a doorway — a doorway is one opening shared by two rooms, so a trap on it fires on anyone crossing it in either direction, from either side. Letter bombs and spring traps take the victim out; a water bucket freezes them for 3 seconds. **Your own traps are live against you**, and catching yourself is nobody's takedown. A disarm tool recovers any trap, including your own.
 
 Agents have **5 health**. A strike takes 1, or 2 with the stiletto. Hidden alongside the intelligence are medkits (restore 3), ballistic vests (raise the maximum by 1) and **exactly one stiletto knife per match**, a random drop that doubles damage, badges its carrier so the room can see them, and falls where they fall. Being taken out drops everything you carry, knife included, and you return after 4 seconds.
 

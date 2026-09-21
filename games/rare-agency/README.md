@@ -97,6 +97,12 @@ its own and says so in the match header while it is away.
 
 ## Rules
 
+**Hangings.** Every room hangs a wall clock or a framed portrait, and those are furniture
+like anything else: searchable, trappable, and capable of hiding a mission item or a power-up.
+A wall safe behind a portrait is the oldest hiding place in the business. They hang above head
+height so they never block movement, and they are drawn flat against the wall rather than
+sorted among the floor pieces. Banners and flags remain pure decoration.
+
 **Furnishing.** Every room is furnished from its own palette, so the twelve kinds of
 furniture tell you where you are: filing cabinets and safes in the Records Vault,
 consoles and lockers in the Signals Room, barrels in the Wine Cellar, tables and

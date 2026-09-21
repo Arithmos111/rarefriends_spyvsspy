@@ -75,6 +75,20 @@ try {
     await page.locator("#stage").screenshot({ path: file });
     console.log(`  · ${index} ${name}`);
   }
+  // The winning sequence, sampled across its run.
+  const escapeDir = path.join(outDir, "escape");
+  await mkdir(escapeDir, { recursive: true });
+  const marks = [0.04, 0.2, 0.38, 0.56, 0.74, 0.92];
+  for (const [step, progress] of marks.entries()) {
+    await page.evaluate(([t, won]) => window.renderEscape(t, won), [progress, true]);
+    const file = path.join(escapeDir, `${step + 1}-escape-${Math.round(progress * 100)}.png`);
+    await page.locator("#stage").screenshot({ path: file });
+    console.log(`  · escape ${Math.round(progress * 100)}%`);
+  }
+  await page.evaluate(() => window.renderEscape(0.82, false));
+  await page.locator("#stage").screenshot({ path: path.join(escapeDir, "7-escape-watching.png") });
+  console.log("  · escape, seen by a losing agent");
+
   if (failures.length) {
     console.error("\nPage errors:");
     for (const failure of failures) console.error(`  ✗ ${failure}`);

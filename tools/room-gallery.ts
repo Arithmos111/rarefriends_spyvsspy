@@ -9,7 +9,7 @@ import { createMatch } from "../games/rare-agency/shared/sim.ts";
 import { buildSnapshot } from "../games/rare-agency/shared/view.ts";
 import { placeMissionItems } from "../games/rare-agency/shared/mansion.ts";
 import { ROOM_COUNT, ROOM_H, ROOM_W, TRAP_TYPES } from "../games/rare-agency/shared/protocol.ts";
-import { drawEmbassy, VIEW_H, VIEW_W } from "../games/rare-agency/render.ts";
+import { drawEmbassy, drawEscapeScene, VIEW_H, VIEW_W } from "../games/rare-agency/render.ts";
 import { createFriendReader } from "@rarefriends/friendsdk/sprites";
 
 const SEED = 20260920;
@@ -20,6 +20,7 @@ declare global {
     roomCount: number;
     roomName(index: number): string;
     renderRoom(index: number): Promise<void>;
+    renderEscape(progress: number, won: boolean): Promise<void>;
   }
 }
 
@@ -89,5 +90,21 @@ window.renderRoom = async index => {
     effects: [],
     reducedMotion: true,
     timeMs: 1200,
+  });
+};
+
+/** The winning sequence, sampled at a given point along its run. */
+window.renderEscape = async (progress, won) => {
+  if (!sprites.has(me.friendId)) await loadSprites();
+  drawEscapeScene(context, {
+    progress,
+    codename: me.codename,
+    friendName: null,
+    sprites: sprites.get(me.friendId),
+    // Not reduced: reduced motion deliberately holds one frame, which would make every
+    // sample in the gallery identical.
+    reducedMotion: false,
+    timeMs: 1000 + progress * 6200,
+    won,
   });
 };
