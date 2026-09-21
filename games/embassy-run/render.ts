@@ -10,10 +10,11 @@
  */
 import { spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/sprites";
 import {
-  DOOR_HALF_WIDTH, FURNITURE_FOOTPRINT, MISSION_ITEMS, ROOM_H, ROOM_W,
+  ATTACK_WINDUP_MS, DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FURNITURE_FOOTPRINT, MISSION_ITEMS,
+  ROOM_H, ROOM_W,
   carryableLabel, doorTrapDirection, isDoorTrapId,
-  type Carryable, type DecorType, type Direction, type FurnitureType, type MatchSnapshot,
-  type RoomActor, type RoomDecor, type RoomTrap,
+  type Carryable, type DecorType, type Direction, type EffectKind, type FurnitureType,
+  type MatchSnapshot, type RoomActor, type RoomDecor, type RoomTrap,
 } from "./shared/protocol.ts";
 import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "./shared/mansion.ts";
 
@@ -64,6 +65,8 @@ export type RenderInput = {
   nearestDropId: number | null;
   /** Doorway the agent is standing close enough to trap. */
   nearestDoor: Direction | null;
+  /** Trap detonations and landed blows currently running in this room. */
+  effects: readonly ActiveEffect[];
   reducedMotion: boolean;
   timeMs: number;
 };
@@ -124,6 +127,8 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
 
   layers.sort((left, right) => left.depth - right.depth);
   for (const layer of layers) layer.draw();
+
+  for (const effect of input.effects) drawEffect(context, effect, reducedMotion);
 
   context.restore();
 }
@@ -650,12 +655,7 @@ function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: 
     if (actor.invulnerableMs > 0 && !input.reducedMotion) {
       context.globalAlpha = 0.45 + 0.55 * (1 + Math.sin(input.timeMs / 90)) / 2;
     }
-    const pixels: [number, number][] = [];
-    rows.forEach((row, py) => [...row].forEach((pixel, px) => { if (pixel === "#") pixels.push([px, py]); }));
-    context.fillStyle = "#fff";
-    for (const [px, py] of pixels) context.fillRect(left + px * 5 - 5, top + py * 5 - 5, 15, 15);
-    context.fillStyle = "#000";
-    for (const [px, py] of pixels) context.fillRect(left + px * 5, top + py * 5, 5, 5);
+    drawFriendPixels(context, rows, left, top, 5);
     context.restore();
   } else {
     context.save();
@@ -752,14 +752,185 @@ function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: 
   }
 
   if (actor.attackingMs > 0) {
+    // The wind-up, read off the remaining window. A drawn stiletto sweeps an arc through
+    // the swing; a bare fist just flares, so the two are never mistaken at a glance.
+    const swing = input.reducedMotion
+      ? 0.5
+      : 1 - Math.max(0, Math.min(1, actor.attackingMs / ATTACK_WINDUP_MS));
     context.save();
     context.strokeStyle = ALERT;
-    context.lineWidth = 3;
-    context.beginPath();
-    context.arc(Math.round(x), Math.round(y) - 26, 26, 0, Math.PI * 2);
-    context.stroke();
+    if (actor.hasKnife) {
+      const from = -Math.PI * 0.85 + swing * Math.PI * 1.15;
+      context.lineWidth = 4;
+      context.strokeStyle = PAPER;
+      context.beginPath();
+      context.arc(Math.round(x), Math.round(y) - 26, 30, from, from + Math.PI * 0.45);
+      context.stroke();
+      context.strokeStyle = ALERT;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(Math.round(x), Math.round(y) - 26, 24, from, from + Math.PI * 0.45);
+      context.stroke();
+    } else {
+      context.lineWidth = 3;
+      context.beginPath();
+      context.arc(Math.round(x), Math.round(y) - 26, 20 + swing * 8, 0, Math.PI * 2);
+      context.stroke();
+    }
     context.restore();
   }
+}
+
+// --- Effects -----------------------------------------------------------------------------
+
+/** One live effect, with the elapsed time the caller has tracked across snapshots. */
+export type ActiveEffect = Readonly<{ kind: EffectKind; x: number; y: number; elapsedMs: number }>;
+
+/**
+ * Trap detonations and landed blows, drawn over the depth-sorted room so a detonation is
+ * never hidden behind the furniture it was planted on. Each trap type gets its own shape
+ * and its own motion, so what went off is readable without the log.
+ *
+ * Reduced motion holds each effect near its most legible frame instead of animating.
+ */
+function drawEffect(
+  context: CanvasRenderingContext2D, effect: ActiveEffect, reducedMotion: boolean,
+): void {
+  const span = EFFECT_DURATION_MS[effect.kind];
+  const t = reducedMotion ? 0.35 : Math.max(0, Math.min(1, effect.elapsedMs / span));
+  const [sx, sy] = project(effect.x, effect.y);
+  const x = Math.round(sx);
+  const y = Math.round(sy);
+  const fade = 1 - t;
+
+  context.save();
+  context.lineCap = "round";
+  context.lineJoin = "round";
+
+  switch (effect.kind) {
+    case "bomb": {
+      // A flash, a shockwave ring travelling out, and soot thrown clear of it.
+      if (t < 0.18) {
+        context.globalAlpha = 1 - t / 0.18;
+        context.fillStyle = PAPER;
+        context.beginPath();
+        context.ellipse(x, y - 18, 46, 24, 0, 0, Math.PI * 2);
+        context.fill();
+      }
+      context.globalAlpha = fade;
+      context.strokeStyle = ALERT;
+      context.lineWidth = Math.max(1, 5 * fade);
+      context.beginPath();
+      context.ellipse(x, y, 16 + t * 62, (16 + t * 62) * BY / AX, 0, 0, Math.PI * 2);
+      context.stroke();
+
+      context.fillStyle = INK;
+      for (let index = 0; index < 8; index++) {
+        const angle = (index / 8) * Math.PI * 2 + 0.3;
+        const reach = 14 + t * 52;
+        const size = Math.max(1, 5 * fade);
+        context.beginPath();
+        context.arc(x + Math.cos(angle) * reach, y - t * 26 + Math.sin(angle) * reach * (BY / AX),
+          size, 0, Math.PI * 2);
+        context.fill();
+      }
+      break;
+    }
+    case "spring": {
+      // A bolt snapping shut: spikes drive inward, then a hard metallic star.
+      const close = Math.min(1, t / 0.3);
+      context.globalAlpha = fade;
+      context.strokeStyle = ALERT;
+      context.lineWidth = 3;
+      for (let index = 0; index < 6; index++) {
+        const angle = (index / 6) * Math.PI * 2;
+        const outer = 46 - close * 30;
+        const inner = outer - 14;
+        context.beginPath();
+        context.moveTo(x + Math.cos(angle) * outer, y - 10 + Math.sin(angle) * outer * (BY / AX));
+        context.lineTo(x + Math.cos(angle) * inner, y - 10 + Math.sin(angle) * inner * (BY / AX));
+        context.stroke();
+      }
+      if (t > 0.25) {
+        context.globalAlpha = fade;
+        context.strokeStyle = PAPER;
+        context.lineWidth = 2;
+        for (let index = 0; index < 4; index++) {
+          const angle = (index / 4) * Math.PI + 0.4;
+          const reach = 10 + (t - 0.25) * 34;
+          context.beginPath();
+          context.moveTo(x - Math.cos(angle) * reach, y - 10 - Math.sin(angle) * reach * (BY / AX));
+          context.lineTo(x + Math.cos(angle) * reach, y - 10 + Math.sin(angle) * reach * (BY / AX));
+          context.stroke();
+        }
+      }
+      break;
+    }
+    case "bucket": {
+      // The pail tips over the head, water sheets down, droplets scatter, a puddle stays.
+      const fall = Math.min(1, t / 0.28);
+      context.globalAlpha = Math.min(1, fade * 1.6);
+      context.fillStyle = WALL_DARK;
+      const pailY = y - 74 + fall * 40;
+      context.fillRect(x - 13, Math.round(pailY), 26, 16);
+      context.fillStyle = INK;
+      context.fillRect(x - 13, Math.round(pailY), 26, 3);
+
+      if (t > 0.2) {
+        context.globalAlpha = fade * 0.75;
+        context.fillStyle = "#7fb0c4";
+        const sheet = Math.min(1, (t - 0.2) / 0.3);
+        context.fillRect(x - 9, Math.round(pailY) + 14, 18, Math.round(sheet * 44));
+        for (let index = 0; index < 7; index++) {
+          const angle = (index / 7) * Math.PI * 2;
+          const reach = sheet * 40;
+          context.beginPath();
+          context.arc(x + Math.cos(angle) * reach, y + Math.sin(angle) * reach * (BY / AX) - 4,
+            Math.max(1, 3 * fade), 0, Math.PI * 2);
+          context.fill();
+        }
+      }
+      context.globalAlpha = fade * 0.5;
+      context.fillStyle = "#7fb0c4";
+      context.beginPath();
+      context.ellipse(x, y, 10 + t * 22, (10 + t * 22) * BY / AX, 0, 0, Math.PI * 2);
+      context.fill();
+      break;
+    }
+    case "slash": {
+      // The stiletto: a bright arc swept through the target, with a thin trailing edge.
+      context.globalAlpha = fade;
+      const sweep = -Math.PI * 0.75 + t * Math.PI * 1.1;
+      context.strokeStyle = PAPER;
+      context.lineWidth = 4;
+      context.beginPath();
+      context.arc(x, y - 26, 30, sweep, sweep + Math.PI * 0.5);
+      context.stroke();
+      context.strokeStyle = ALERT;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(x, y - 26, 36, sweep + 0.1, sweep + Math.PI * 0.42);
+      context.stroke();
+      break;
+    }
+    case "impact": {
+      // A bare fist: a short four-point starburst, no sweep.
+      context.globalAlpha = fade;
+      context.strokeStyle = ALERT;
+      context.lineWidth = 3;
+      for (let index = 0; index < 4; index++) {
+        const angle = (index / 4) * Math.PI * 2 + Math.PI / 4;
+        const inner = 8 + t * 6;
+        const outer = inner + 14 * fade + 6;
+        context.beginPath();
+        context.moveTo(x + Math.cos(angle) * inner, y - 26 + Math.sin(angle) * inner);
+        context.lineTo(x + Math.cos(angle) * outer, y - 26 + Math.sin(angle) * outer);
+        context.stroke();
+      }
+      break;
+    }
+  }
+  context.restore();
 }
 
 /** Screen point to world point, for tap-to-walk. Exact inverse of project(). */
@@ -767,6 +938,202 @@ export function unproject(screenX: number, screenY: number): [number, number] {
   const u = (screenX - CX + OFF) / AX;
   const v = (screenY - CY) / BY;
   return [(v + u) / 2, (v - u) / 2];
+}
+
+// --- Title screen ------------------------------------------------------------------------
+
+/**
+ * Draws a Friend's canonical pixels at an arbitrary integer scale, with the white one-pixel
+ * halo and black mask the artwork routine requires. Shared by the agents in the room and by
+ * the large portrait on the title screen, so the treatment can never drift between them.
+ */
+function drawFriendPixels(
+  context: CanvasRenderingContext2D, rows: readonly string[],
+  left: number, top: number, scale: number,
+): void {
+  const pixels: [number, number][] = [];
+  rows.forEach((row, py) => [...row].forEach((pixel, px) => { if (pixel === "#") pixels.push([px, py]); }));
+  context.fillStyle = "#fff";
+  for (const [px, py] of pixels) {
+    context.fillRect(left + px * scale - scale, top + py * scale - scale, scale * 3, scale * 3);
+  }
+  context.fillStyle = "#000";
+  for (const [px, py] of pixels) context.fillRect(left + px * scale, top + py * scale, scale, scale);
+}
+
+/**
+ * The attract screen. It has to answer "what is this?" in the two seconds before somebody
+ * decides whether to press anything, so it shows the embassy at night, the agent they will
+ * actually be playing at portrait scale, and the four things they have to come out with.
+ *
+ * Reduced motion stops the searchlight and the walk cycle rather than removing them.
+ */
+export function drawTitleScreen(
+  context: CanvasRenderingContext2D,
+  options: {
+    timeMs: number; reducedMotion: boolean;
+    sprites: GenerationSprites | "loading" | "error" | undefined;
+    codename: string; friendName: string | null; friendId: string;
+  },
+): void {
+  const { timeMs, reducedMotion } = options;
+  const t = reducedMotion ? 0 : timeMs / 1000;
+  const horizon = 452;
+
+  context.save();
+  context.imageSmoothingEnabled = false;
+
+  const sky = context.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, "#0b0f07");
+  sky.addColorStop(0.7, "#1b2313");
+  sky.addColorStop(1, "#33401f");
+  context.fillStyle = sky;
+  context.fillRect(0, 0, VIEW_W, horizon);
+
+  // A fixed star field: hashed from the index so it does not shimmer between frames.
+  context.fillStyle = "rgba(238,241,228,0.55)";
+  for (let index = 0; index < 70; index++) {
+    const sx = (index * 947) % VIEW_W;
+    const sy = (index * 613) % (horizon - 120);
+    const twinkle = reducedMotion ? 1 : 0.5 + 0.5 * Math.sin(t * 1.6 + index);
+    context.globalAlpha = 0.25 + twinkle * 0.5;
+    context.fillRect(sx, sy, 2, 2);
+  }
+  context.globalAlpha = 1;
+
+  // Searchlight sweeping the sky from behind the building.
+  const sweep = Math.sin(t * 0.35) * 0.5;
+  context.save();
+  context.translate(214, horizon + 10);
+  context.rotate(-Math.PI / 2 + sweep);
+  const beam = context.createLinearGradient(0, 0, 560, 0);
+  beam.addColorStop(0, "rgba(204,255,0,0.22)");
+  beam.addColorStop(1, "rgba(204,255,0,0)");
+  context.fillStyle = beam;
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(560, -76);
+  context.lineTo(560, 76);
+  context.closePath();
+  context.fill();
+  context.restore();
+
+  // Ground.
+  context.fillStyle = "#26301a";
+  context.fillRect(0, horizon, VIEW_W, VIEW_H - horizon);
+  context.strokeStyle = "rgba(204,255,0,0.18)";
+  context.lineWidth = 1;
+  for (let index = 1; index < 7; index++) {
+    const gy = horizon + index * index * 4;
+    if (gy > VIEW_H) break;
+    context.beginPath();
+    context.moveTo(0, gy);
+    context.lineTo(VIEW_W, gy);
+    context.stroke();
+  }
+
+  // The embassy itself: a flat silhouette with lit windows and a flag.
+  context.fillStyle = "#11160c";
+  context.fillRect(96, 300, 236, horizon - 300);
+  context.fillRect(60, 356, 36, horizon - 356);
+  context.fillRect(332, 356, 36, horizon - 356);
+  context.beginPath();
+  context.moveTo(96, 300);
+  context.lineTo(214, 252);
+  context.lineTo(332, 300);
+  context.closePath();
+  context.fill();
+  context.fillRect(212, 214, 4, 42);
+  context.fillStyle = ALERT;
+  context.beginPath();
+  context.moveTo(216, 216);
+  context.lineTo(216 + 30, 224);
+  context.lineTo(216, 234);
+  context.closePath();
+  context.fill();
+
+  for (let row = 0; row < 3; row++) {
+    for (let column = 0; column < 5; column++) {
+      // One window per row is dark, rotating slowly, so the building looks occupied.
+      const lit = reducedMotion || (column + row) % 5 !== Math.floor(t * 0.7) % 5;
+      context.fillStyle = lit ? "#e8c547" : "#1d2413";
+      context.fillRect(118 + column * 42, 318 + row * 40, 22, 26);
+    }
+  }
+  context.fillStyle = "#e8c547";
+  context.fillRect(196, 412, 36, horizon - 412);
+
+  // Title block.
+  context.textAlign = "left";
+  context.fillStyle = SIGNAL;
+  context.font = "800 74px ui-monospace, monospace";
+  context.fillText("EMBASSY", 452, 190);
+  context.fillText("RUN", 452, 262);
+  context.strokeStyle = INK;
+  context.lineWidth = 2;
+  context.strokeText("EMBASSY", 452, 190);
+  context.strokeText("RUN", 452, 262);
+
+  context.fillStyle = PAPER;
+  context.font = "700 17px ui-monospace, monospace";
+  context.fillText("SPY VS SPY, RUN BY RARE FRIENDS", 456, 296);
+  context.fillStyle = "rgba(238,241,228,0.66)";
+  context.font = "600 14px ui-monospace, monospace";
+  context.fillText("2-4 agents · one mansion · four things worth stealing", 456, 320);
+
+  // The four objectives, as the glyphs used everywhere else in the game.
+  MISSION_ITEMS.forEach((item, index) => {
+    const gx = 470 + index * 74;
+    const gy = 372;
+    context.save();
+    context.globalAlpha = 0.95;
+    context.fillStyle = "rgba(20,24,15,0.72)";
+    context.strokeStyle = "rgba(204,255,0,0.5)";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.roundRect(gx - 26, gy - 26, 52, 52, 8);
+    context.fill();
+    context.stroke();
+    context.restore();
+    drawCarryableGlyph(context, gx, gy, 30, item, SIGNAL);
+  });
+
+  // The agent, stood on the apron at portrait scale.
+  const entry = options.sprites;
+  const scale = 9;
+  const left = 214 - (16 * scale) / 2;
+  const top = horizon - 16 * scale + 12;
+  context.save();
+  context.fillStyle = "rgba(0,0,0,0.42)";
+  context.beginPath();
+  context.ellipse(214, horizon + 14, 62, 15, 0, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+
+  if (entry && entry !== "loading" && entry !== "error") {
+    const frameIndex = reducedMotion ? 0 : Math.floor(timeMs / 130) % 8;
+    const rows = spriteFrame(entry, "down", !reducedMotion, frameIndex, "right").frame.rows;
+    context.save();
+    context.beginPath();
+    context.rect(left - scale, top - scale, 16 * scale + scale * 2, 16 * scale + scale * 2);
+    context.clip();
+    drawFriendPixels(context, rows, left, top, scale);
+    context.restore();
+  } else {
+    context.save();
+    context.strokeStyle = "rgba(238,241,228,0.5)";
+    context.setLineDash([6, 6]);
+    context.lineWidth = 3;
+    context.strokeRect(left + 24, top + 20, 96, 124);
+    context.setLineDash([]);
+    context.fillStyle = "rgba(238,241,228,0.7)";
+    context.font = "600 13px ui-monospace, monospace";
+    context.textAlign = "center";
+    context.fillText(entry === "error" ? "ARTWORK OFFLINE" : "LOADING ARTWORK…", 214, top + 88);
+    context.restore();
+  }
+
+  context.restore();
 }
 
 // --- Escape sequence ---------------------------------------------------------------------

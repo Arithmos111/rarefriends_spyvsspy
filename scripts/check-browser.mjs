@@ -96,6 +96,71 @@ try {
   await relayOnline(two);
   step("both agents reached the same-origin relay from inside the sandbox");
 
+  /** How many distinct colours the game canvas is painting; a blank canvas returns 1. */
+  const paintedColours = agent => agent.child.locator(".er-canvas").evaluate(canvas => {
+    const context = canvas.getContext("2d");
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const seen = new Set();
+    for (let i = 0; i < data.length; i += 4 * 997) seen.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
+    return seen.size;
+  });
+
+  // --- Title screen ----------------------------------------------------------------------
+  // The attract screen is what everybody sees first, and it names the Friend being played.
+  await one.child.getByRole("button", { name: "Training run", exact: true })
+    .waitFor({ timeout: 15000 });
+  const titleLabel = await one.child.locator("canvas.er-canvas").first().getAttribute("aria-label");
+  if (!/Embassy Run/i.test(titleLabel ?? "")) {
+    throw new Error(`title screen should introduce the game, got: ${titleLabel}`);
+  }
+  step("the title screen introduces the game and the Friend being played");
+
+  const enterEmbassy = async agent => {
+    await agent.child.getByRole("button", { name: "Enter the embassy", exact: true }).click();
+    await agent.child.getByRole("heading", { name: "Agent dossier" }).waitFor({ timeout: 15000 });
+  };
+  await enterEmbassy(one);
+  await enterEmbassy(two);
+  step("both agents left the title screen for the briefing");
+
+  // --- Training run ----------------------------------------------------------------------
+  // The rehearsal runs entirely in the browser, so it must work with the relay untouched.
+  // Reachable from the briefing as well as the title screen, so it can be replayed.
+  const training = two.child.getByRole("button", { name: "Training run", exact: true });
+  await training.waitFor({ timeout: 20000 });
+  await training.click();
+  await two.child.getByRole("heading", { name: "Move" }).waitFor({ timeout: 15000 });
+  // The rehearsal has no relay to hand it a map, so prove it is drawing a real room and not
+  // an empty canvas behind the lesson card.
+  await two.page.waitForTimeout(400);
+  const trainingPaint = await paintedColours(two);
+  assert.ok(trainingPaint > 4,
+    `the training run is not drawing the embassy (${trainingPaint} distinct sampled colours)`);
+  step(`training run renders the embassy (${trainingPaint} distinct sampled colours)`);
+
+  const firstStep = await two.child.locator(".er-lesson-step").innerText();
+  // The step counter is uppercased by CSS, so match without regard to case.
+  assert.match(firstStep, /step 1 of \d+/i, "the training run should open on its first step");
+
+  // Skipping walks the whole sequence, which proves every lesson can be staged and shown.
+  const titles = [];
+  for (let guard = 0; guard < 24; guard++) {
+    const done = await two.child.locator(".er-lesson-done").count();
+    if (done) break;
+    titles.push(await two.child.locator(".er-lesson h3").innerText());
+    await two.child.getByRole("button", { name: "Skip step", exact: true }).click();
+    await two.page.waitForTimeout(120);
+  }
+  await two.child.getByRole("heading", { name: "Training complete" }).waitFor({ timeout: 15000 });
+  assert.ok(titles.length >= 8, `the training run should have several steps, saw ${titles.length}`);
+  step(`training run covers ${titles.length} steps: ${titles.join(" → ")}`);
+
+  // Hand the screen back, so this agent is on the briefing for the lobby steps below.
+  await two.child.getByRole("button", { name: "Find a match", exact: true }).click();
+  await two.child.getByRole("heading", { name: "Agent dossier" }).waitFor({ timeout: 15000 });
+  step("left the training run and returned to the briefing");
+
+
   // --- Simulated economy: buy a crate and open it into a kit -----------------------------
   const confirm = page => page.getByRole("button", { name: /^Confirm preview/ }).click();
   await one.child.getByRole("button", { name: /^Buy crate/ }).click();
@@ -194,13 +259,7 @@ try {
   step("scoreboard shows both agents in one match");
 
   // Canvas is actually painting, not blank.
-  const painted = await one.child.locator(".er-canvas").evaluate(canvas => {
-    const context = canvas.getContext("2d");
-    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    const seen = new Set();
-    for (let i = 0; i < data.length; i += 4 * 997) seen.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
-    return seen.size;
-  });
+  const painted = await paintedColours(one);
   assert.ok(painted > 4, `the embassy canvas looks blank (${painted} distinct sampled colours)`);
   step(`embassy canvas rendering (${painted} distinct sampled colours)`);
 

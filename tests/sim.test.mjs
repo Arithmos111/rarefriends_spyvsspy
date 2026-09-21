@@ -500,3 +500,91 @@ test("friend names are validated before display", () => {
   assert.equal(P.displayName("FALCON", "Nightjar"), "FALCON (Nightjar)");
   assert.equal(P.displayName("FALCON", null), "FALCON");
 });
+
+// --- Detonation and swing effects -------------------------------------------------------
+
+test("each trap type springs an effect of its own kind where the victim stood", () => {
+  for (const type of P.TRAP_TYPES) {
+    const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+    const owner = match.players.get("a");
+    const victim = match.players.get("b");
+    const piece = match.map.rooms[0].furniture[0];
+    owner.room = 0; owner.x = piece.x; owner.y = piece.y + 30;
+    owner.traps[type] = 1;
+    sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: type });
+    run(match, P.PLANT_MS + 100);
+
+    // Move the owner elsewhere so the cue below cannot be confused with the victim's own.
+    owner.room = 4;
+    victim.room = 0; victim.x = piece.x; victim.y = piece.y + 30;
+    match.cues.length = 0;
+    match.effects.length = 0;
+    sim.applyAction(match, "b", { kind: "search", furnitureId: piece.id });
+    run(match, P.SEARCH_MS + 200);
+
+    const spawned = match.effects.filter(entry => entry.kind === type);
+    assert.equal(spawned.length, 1, `${type} should spawn exactly one effect`);
+    assert.equal(spawned[0].room, 0, `the ${type} effect belongs to the room it went off in`);
+    assert.equal(spawned[0].x, victim.x, `the ${type} effect sits where the victim stood`);
+
+    assert.ok(match.cues.some(entry => entry.kind === "trap" && entry.trap === type
+      && entry.to === "b"), `the victim is told which trap caught them (${type})`);
+    assert.ok(match.cues.some(entry => entry.kind === "trap-sprung" && entry.trap === type
+      && entry.to === "a"), `the owner hears their own ${type} spring, from another room`);
+  }
+});
+
+test("an agent caught by their own trap is not told somebody else walked into it", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const agent = match.players.get("a");
+  const piece = match.map.rooms[0].furniture[0];
+  agent.room = 0; agent.x = piece.x; agent.y = piece.y + 30;
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+  match.cues.length = 0;
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.ok(!match.cues.some(entry => entry.kind === "trap-sprung"),
+    "an own goal must not report as a trap catching somebody");
+});
+
+test("a landed blow spawns a slash for the knife and an impact for a fist", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const attacker = match.players.get("a");
+  const target = match.players.get("b");
+  attacker.room = 0; attacker.x = 200; attacker.y = 200; attacker.invulnerableUntil = 0;
+  target.room = 0; target.x = 220; target.y = 200; target.invulnerableUntil = 0;
+
+  match.effects.length = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.equal(match.effects.at(-1)?.kind, "impact", "a bare fist lands as an impact");
+
+  attacker.knife = true;
+  attacker.attackReadyAt = 0;
+  target.stunnedUntil = 0;
+  match.effects.length = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.equal(match.effects.at(-1)?.kind, "slash", "the stiletto lands as a slash");
+});
+
+test("a missed swing spawns no effect", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const attacker = match.players.get("a");
+  match.players.get("b").room = 5;
+  attacker.room = 0; attacker.x = 200; attacker.y = 200;
+  match.effects.length = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.equal(match.effects.length, 0, "swinging at nobody leaves nothing behind");
+});
+
+test("effects are pruned once their animation has run out", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const attacker = match.players.get("a");
+  const target = match.players.get("b");
+  attacker.room = 0; attacker.x = 200; attacker.y = 200; attacker.invulnerableUntil = 0;
+  target.room = 0; target.x = 220; target.y = 200; target.invulnerableUntil = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.equal(match.effects.length, 1);
+  run(match, P.EFFECT_DURATION_MS.impact + 100);
+  assert.equal(match.effects.length, 0, "presentation state must not accumulate over a match");
+});

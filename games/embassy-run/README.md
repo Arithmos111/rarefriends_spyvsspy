@@ -30,6 +30,20 @@ then create or join a lobby.
 > wallet; a temporary, balance-dependent Friend is not eligible. Open the same URL on a second device or browser to play
 against yourself. The printed LAN URL works from a phone on the same wifi.
 
+## Title screen and training run
+
+The game opens on an attract screen: the embassy at night, your own Friend drawn at portrait
+scale from the canonical artwork, your career record, and three ways in — **Enter the embassy**,
+**Training run**, and **Standings**.
+
+The training run is a nine-step walkthrough of every control. It steps the real simulation in
+the browser with no relay and no lobby, so it starts instantly and nothing another player does
+can disturb it, and each step is cleared by actually performing the action rather than by
+watching one: move, cross a doorway, search, take intelligence, trap furniture, trap a doorway,
+strike, strike with the stiletto, escape. A step cannot be cleared until it has been readable
+for a moment, so one you happen to satisfy on the way in is still shown. **Skip step** jumps
+ahead and **Leave training** returns to the briefing, where the run can be started again.
+
 ## Controls
 
 | Input | Action |
@@ -43,6 +57,13 @@ against yourself. The printed LAN URL works from a phone on the same wifi.
 | **Q** or the trap button | Open the trap menu for the furniture **or doorway** you are standing at |
 | **1 / 2 / 3** | Set a letter bomb, spring trap or water bucket directly |
 | **Esc** | Close a menu |
+
+Every trap has its own detonation, in the world and in the ear: a letter bomb throws a
+shockwave and soot, a spring trap snaps shut in a metal star, a water bucket tips and splashes,
+and each has a distinct sound. The agent who set it hears it spring from anywhere on the map
+and is told who walked into it. Striking reads differently depending on what you are holding —
+a bare fist flares, the stiletto sweeps a bright arc and lands as a slash — and detonations are
+drawn over the room, so one is never hidden behind the furniture it was planted on.
 
 Sound is off by default. Mute and reduce-motion live in the in-match settings menu (≡), and
 reduced motion is also picked up from your system setting. If a Friend's artwork fails to load
@@ -224,13 +245,24 @@ widths.
 - **Preview state is session-local.** The SDK's simulated ledger resets on reload, so
   kits bought in one session are gone in the next. Persisting them needs the on-chain
   phase.
-- **Match results are not recorded anywhere.** There are no standings, no ranking and
-  no reward for winning beyond the result screen. Awarding RF for a match win would
-  need contract support for a skill-decided payout, which the v0.1 chance-game
-  contract does not model.
+- **Career standings are only as trustworthy as the Friend ID a client claims.** Match
+  results are recorded per Friend on the relay and survive restarts, but they inherit
+  the verification gap above: a client that claims another Friend's ID would have its
+  results filed under that ID. The same applies to the name shown in parentheses.
+- **Winning pays nothing.** Standings are a scoreboard, not a reward. Awarding RF for a
+  match win would need contract support for a skill-decided payout, which the v0.1
+  chance-game contract does not model.
 - **A portrait phone is cramped.** The SDK container is a fixed 3:2 box, so upright
   phones get a small stage. The game stays playable and shows a prompt to rotate.
 - **Reconnecting mid-match rejoins as a new agent** rather than resuming the old one.
+- **The SDK's Friend picker does not scale to a large collection.** It renders owned
+  Friends as a flat list of text buttons with no artwork, no search and no ordering, so
+  a wallet holding hundreds is painful to choose from. Discovery itself handles up to
+  10,000. This cannot be fixed from game code: the SDK's AGENTS.md forbids a game
+  implementing another Friend selector, and `GameHostProps` exposes no hook for an
+  initial Friend, an ordering or a row renderer. The title screen shows the selected
+  Friend's artwork at portrait scale, which is the nearest a game can get. Raised as
+  SDK feedback in the submission.
 - **A wrong-network wallet looks identical to owning no Friends.** The SDK runtime shows
   "Switch your wallet to Robinhood mainnet (4663)" and "No playable Friends found" at the
   same time, because discovery only runs once the wallet reports chain 4663 and otherwise

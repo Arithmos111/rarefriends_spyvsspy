@@ -422,3 +422,58 @@
   .er-flash { animation: none; }
   .er-health-fill { transition: none; }
 }
+
+/* --- Title screen ---------------------------------------------------------------------- */
+
+.er-title {
+  position: relative; flex: 1 1 auto; min-height: 0;
+  display: grid; place-items: center; background: var(--void);
+}
+.er-title-actions {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  /* Clear of the SDK frame's own menu bar, which sits along the container's bottom edge. */
+  bottom: max(104px, 21cqh); z-index: 3;
+  display: flex; gap: 0.6em; flex-wrap: wrap; justify-content: center;
+}
+.er-title-actions button { min-width: 9em; }
+.er-title-foot {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: max(48px, 10cqh); z-index: 3; margin: 0;
+  font: 600 12px/1.4 ui-monospace, monospace;
+  color: var(--paper); opacity: 0.82; text-align: center; line-height: 1.6;
+  max-width: 90%; text-wrap: balance;
+}
+
+/* --- Training run ---------------------------------------------------------------------- */
+
+.er-lesson {
+  position: absolute; z-index: 6;
+  left: 50%; transform: translateX(-50%);
+  bottom: max(96px, 20cqh);
+  width: min(560px, 86%);
+  background: rgba(20, 24, 15, 0.94);
+  border: 2px solid var(--signal);
+  border-radius: 10px;
+  padding: 0.75em 0.95em;
+  color: var(--paper);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.er-lesson-head { display: flex; align-items: baseline; gap: 0.7em; flex-wrap: wrap; }
+.er-lesson-step {
+  font: 700 11px ui-monospace, monospace;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--signal);
+}
+.er-lesson h3 { margin: 0; font: 700 16px ui-monospace, monospace; }
+.er-lesson p { margin: 0.4em 0 0.7em; font-size: 13px; line-height: 1.45; }
+.er-lesson .er-row { gap: 0.5em; }
+.er-lesson button { font-size: 12px; padding: 0.35em 0.7em; }
+.er-lesson-done { border-color: var(--paper); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .er-lesson { animation: er-lesson-in 220ms ease-out; }
+}
+@keyframes er-lesson-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

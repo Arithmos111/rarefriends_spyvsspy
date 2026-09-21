@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -235,10 +235,24 @@ export type RoomDrop = Readonly<{ id: number; item: Carryable; x: number; y: num
 /** A trap the viewer is allowed to see, on furniture or on a doorway. */
 export type RoomTrap = Readonly<{ targetId: number; type: TrapType; mine: boolean }>;
 
+/**
+ * A short-lived world effect drawn at a point in the viewer's room: a trap going off, or a
+ * blow landing. Everyone standing in the room sees it, so a detonation reads as an event in
+ * the world rather than as private feedback to whoever it happened to.
+ */
+export const EFFECT_KINDS = ["bomb", "spring", "bucket", "slash", "impact"] as const;
+export type EffectKind = typeof EFFECT_KINDS[number];
+export const EFFECT_DURATION_MS: Readonly<Record<EffectKind, number>> = Object.freeze({
+  bomb: 900, spring: 720, bucket: 860, slash: 260, impact: 340,
+});
+export type RoomEffect = Readonly<{ id: number; kind: EffectKind; x: number; y: number; ageMs: number }>;
+
 /** Centre-screen pickup flash, and other one-shot presentation cues. */
 export type MatchCue =
   | { kind: "pickup"; item: Carryable }
   | { kind: "trap"; trap: TrapType }
+  /** Your trap caught somebody else. */
+  | { kind: "trap-sprung"; trap: TrapType }
   | { kind: "hurt"; amount: number }
   | { kind: "heal"; amount: number }
   | { kind: "takedown" }
@@ -260,6 +274,8 @@ export type MatchSnapshot = Readonly<{
   /** Only traps the viewer planted, or can see with a detector. Covers furniture and doorways. */
   traps: readonly RoomTrap[];
   drops: readonly RoomDrop[];
+  /** Trap detonations and blows landing in this room, for the duration of their animation. */
+  effects: readonly RoomEffect[];
   scoreboard: readonly PublicPlayer[];
 }>;
 

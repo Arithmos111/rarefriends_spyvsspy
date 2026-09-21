@@ -8,13 +8,15 @@
  */
 import {
   ATTACK_COOLDOWN_MS, ATTACK_RANGE, ATTACK_WINDUP_MS, BUCKET_STUN_MS, DISARM_MS,
-  DOOR_HALF_WIDTH, FIST_DAMAGE, HIT_STUN_MS, INTERACT_RANGE, KNIFE_DAMAGE, MATCH_SECONDS,
+  DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FIST_DAMAGE, HIT_STUN_MS, INTERACT_RANGE, KNIFE_DAMAGE,
+  MATCH_SECONDS,
   MAX_STEP_MS, MEDKIT_HEAL, MISSION_ITEMS, PLANT_MS, PLAYER_HP_CEILING, PLAYER_MAX_HP,
   PLAYER_RADIUS, PLAYER_SPEED, RESPAWN_MS, ROOM_H, ROOM_W, SCORE_ESCAPE, SCORE_PER_ITEM,
   SCORE_PER_TAKEDOWN, SCORE_SURVIVED, SCORE_TIME_WIN, SEARCH_MS, SEARCH_MS_LOCKPICK,
   SPAWN_INVULNERABLE_MS, TRAP_IS_LETHAL, TRAP_LABELS, TRAP_TYPES, VEST_BONUS_HP,
   carryableLabel, doorTrapDirection, doorTrapId, isDoorTrapId, isPowerUp, neighbourRoom,
-  type Carryable, type Direction, type MatchCue, type MatchEvent, type MissionItem,
+  type Carryable, type Direction, type EffectKind, type MatchCue, type MatchEvent,
+  type MissionItem,
   type PlayerAction, type PowerUp, type TrapType,
 } from "./protocol.ts";
 import {
@@ -44,6 +46,9 @@ export type SimPlayer = {
 export type SimTrap = { targetId: number; type: TrapType; ownerId: string };
 export type SimDrop = { id: number; item: Carryable; room: number; x: number; y: number };
 
+/** A trap detonation or a landed blow, kept only while its animation runs. */
+export type SimEffect = { id: number; kind: EffectKind; room: number; x: number; y: number; bornAt: number };
+
 export type SimEvent = MatchEvent & { to?: string };
 export type SimCue = MatchCue & { to: string };
 
@@ -52,6 +57,7 @@ export type MatchSim = {
   players: Map<string, SimPlayer>;
   traps: Map<number, SimTrap>;
   drops: SimDrop[]; nextDropId: number;
+  effects: SimEffect[]; nextEffectId: number;
   now: number; endsAt: number; tick: number;
   finished: boolean; winner: string | null; endReason: string;
   /** True when the winner reached the gate, which plays the escape sequence. */
@@ -91,6 +97,7 @@ export function createMatch(
   });
   return {
     seed, map, players, traps: new Map(), drops: [], nextDropId: 1,
+    effects: [], nextEffectId: 1,
     now, endsAt: now + MATCH_SECONDS * 1000, tick: 0,
     finished: false, winner: null, endReason: "", escaped: false, events: [], cues: [],
   };
@@ -109,6 +116,11 @@ function emit(sim: MatchSim, text: string, tone: MatchEvent["tone"], to?: string
 function cue(sim: MatchSim, to: string, value: MatchCue) {
   sim.cues.push({ ...value, to });
   if (sim.cues.length > 120) sim.cues.splice(0, sim.cues.length - 120);
+}
+
+/** Spawn a world effect. Pruned by age in step(), so nothing accumulates across a match. */
+function effect(sim: MatchSim, kind: EffectKind, room: number, x: number, y: number): void {
+  sim.effects.push({ id: sim.nextEffectId++, kind, room, x, y, bornAt: sim.now });
 }
 
 export function attackDamage(player: SimPlayer): number {
@@ -194,6 +206,11 @@ export function stepMatch(sim: MatchSim, deltaMs: number): void {
   if (sim.finished) return;
   sim.now += deltaMs;
   sim.tick++;
+
+  // Effects are presentation only; drop them once their animation has run out.
+  if (sim.effects.length) {
+    sim.effects = sim.effects.filter(entry => sim.now - entry.bornAt < EFFECT_DURATION_MS[entry.kind]);
+  }
 
   for (const player of sim.players.values()) {
     if (player.respawnAt > 0) {
@@ -404,6 +421,9 @@ function triggerTrap(sim: MatchSim, victim: SimPlayer, trap: SimTrap): void {
   const ownGoal = trap.ownerId === victim.playerId;
   const label = TRAP_LABELS[trap.type].toLowerCase();
   cue(sim, victim.playerId, { kind: "trap", trap: trap.type });
+  effect(sim, trap.type, victim.room, victim.x, victim.y);
+  // The owner hears their own trap spring, wherever they are standing.
+  if (owner && !ownGoal) cue(sim, owner.playerId, { kind: "trap-sprung", trap: trap.type });
   if (TRAP_IS_LETHAL[trap.type]) {
     emit(sim, ownGoal
       ? `${victim.codename} was caught by their own ${label}.`
@@ -440,6 +460,7 @@ function attack(sim: MatchSim, player: SimPlayer): void {
   best.busy = null;
   best.stunnedUntil = sim.now + HIT_STUN_MS;
   cue(sim, best.playerId, { kind: "hurt", amount: damage });
+  effect(sim, player.knife ? "slash" : "impact", best.room, best.x, best.y);
   if (best.hp <= 0) {
     player.takedowns++;
     cue(sim, player.playerId, { kind: "takedown" });

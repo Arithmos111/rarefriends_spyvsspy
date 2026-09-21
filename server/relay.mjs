@@ -9,12 +9,13 @@ import { WebSocketServer } from "ws";
 import { randomUUID } from "node:crypto";
 import {
   INPUT_HZ, LOBBY_AUTOSTART_MS, LOBBY_IDLE_MS, LOBBY_MAX_PLAYERS, LOBBY_MIN_PLAYERS,
-  MATCH_SECONDS, PROTOCOL_VERSION, TICK_MS, TRAP_TYPES,
-  isDoorTrapId, normaliseFriendName,
+  MATCH_SECONDS, PROTOCOL_VERSION, TICK_MS,
+  normaliseFriendName,
 } from "../games/embassy-run/shared/protocol.ts";
 import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "../games/embassy-run/shared/mansion.ts";
 import { isKnownKit, kitById } from "../games/embassy-run/shared/loadouts.ts";
 import { applyAction, applyInput, createMatch, dropPlayer, scoreOf, stepMatch } from "../games/embassy-run/shared/sim.ts";
+import { buildSnapshot as snapshotFor, scoreboardOf } from "../games/embassy-run/shared/view.ts";
 import { holdsGenesis, ownerOfFriend, rpcConfigSummary } from "./rpc.mjs";
 import { createLeaderboard } from "./leaderboard.mjs";
 
@@ -242,71 +243,8 @@ export function createRelay({ log = console.log } = {}) {
     log(`match ended in lobby ${lobby.code}: ${match.endReason}`);
   }
 
-  function scoreboard(match) {
-    return [...match.players.values()]
-      .map(player => ({
-        playerId: player.playerId, codename: player.codename, friendId: player.friendId,
-        genesis: player.genesis, friendName: player.friendName,
-        items: player.inventory.length, deaths: player.deaths, takedowns: player.takedowns,
-        connected: player.connected, hasKnife: player.knife, score: scoreOf(match, player),
-      }))
-      .sort((a, b) => b.score - a.score || b.items - a.items || a.deaths - b.deaths);
-  }
-
-  function buildSnapshot(match, playerId) {
-    const self = match.players.get(playerId);
-    const room = match.map.rooms[self.room];
-    const detect = self.detector;
-    const actorOf = player => ({
-      playerId: player.playerId, friendId: player.friendId, codename: player.codename,
-      genesis: player.genesis, friendName: player.friendName,
-      x: Math.round(player.x * 10) / 10, y: Math.round(player.y * 10) / 10,
-      facing: player.facing, walking: player.walking,
-      hp: player.hp, maxHp: player.maxHp, hasKnife: player.knife,
-      stunnedMs: Math.max(0, player.stunnedUntil - match.now),
-      attackingMs: Math.max(0, player.attackingUntil - match.now),
-      invulnerableMs: Math.max(0, player.invulnerableUntil - match.now),
-      busy: player.busy ? {
-        kind: player.busy.kind, targetId: player.busy.targetId,
-        progress: Math.min(1, (match.now - player.busy.startedAt) / Math.max(1, player.busy.endsAt - player.busy.startedAt)),
-      } : null,
-    });
-
-    // Only traps this viewer set, or can see with a detector. Includes doorway traps.
-    const visibleTraps = [];
-    for (const trap of match.traps.values()) {
-      if (Math.floor(trap.targetId / 100) !== self.room) continue;
-      const mine = trap.ownerId === playerId;
-      if (!mine && !detect) continue;
-      visibleTraps.push({ targetId: trap.targetId, type: trap.type, mine });
-    }
-
-    return {
-      t: "snapshot", tick: match.tick, ackSeq: self.lastSeq,
-      secondsLeft: Math.max(0, Math.round((match.endsAt - match.now) / 1000)),
-      roomIndex: self.room, roomName: room.name, doors: room.doors,
-      exitHere: self.room === match.map.exitRoom,
-      self: {
-        ...actorOf(self),
-        inventory: [...self.inventory],
-        powerUps: [...self.powerUps],
-        traps: Object.fromEntries(TRAP_TYPES.map(type => [type, self.traps[type] ?? 0])),
-        hasDetector: self.detector, hasLockpick: self.lockpick, hasDisarm: self.disarm,
-        respawnMs: Math.max(0, self.respawnAt ? self.respawnAt - match.now : 0),
-      },
-      actors: [...match.players.values()]
-        .filter(player => player.playerId !== playerId && player.room === self.room && player.respawnAt === 0)
-        .map(actorOf),
-      furniture: room.furniture.map(piece => ({
-        id: piece.id, type: piece.type, x: piece.x, y: piece.y,
-        searched: piece.searched, emptied: piece.emptied,
-      })),
-      traps: visibleTraps,
-      drops: match.drops.filter(drop => drop.room === self.room)
-        .map(drop => ({ id: drop.id, item: drop.item, x: drop.x, y: drop.y })),
-      scoreboard: scoreboard(match),
-    };
-  }
+  const scoreboard = scoreboardOf;
+  const buildSnapshot = (match, playerId) => snapshotFor(match, playerId);
 
   async function handleHello(player, message) {
     if (player.friendId) return;

@@ -21,12 +21,16 @@ import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "
 
 import { createNet, type Net, type NetStatus } from "./net.ts";
 import {
-  drawCarryableGlyph, drawEmbassy, drawEscapeScene, doorAnchorWorld, ESCAPE_DURATION_MS,
-  unproject, VIEW_H, VIEW_W,
+  LESSONS, TRAINEE, advanceTutorial, lessonOf, startTutorial, stepTutorial, tutorialAction,
+  tutorialSnapshot, type Lesson, type TutorialState,
+} from "./tutorial.ts";
+import {
+  drawCarryableGlyph, drawEmbassy, drawEscapeScene, drawTitleScreen, doorAnchorWorld,
+  ESCAPE_DURATION_MS, unproject, VIEW_H, VIEW_W, type ActiveEffect,
 } from "./render.ts";
 import { createAudio, type Audio, type SoundCue } from "./audio.ts";
 import {
-  DIRECTIONS, INPUT_MS, INTERACT_RANGE, MATCH_SECONDS, MAX_FRIEND_NAME, MISSION_ITEMS,
+  DIRECTIONS, INPUT_MS, INTERACT_RANGE, MATCH_SECONDS, MAX_FRIEND_NAME, MISSION_ITEMS, TICK_MS,
   MISSION_ITEM_LABELS, POWER_UP_BLURBS, POWER_UP_LABELS, ROOM_H, ROOM_W, TRAP_LABELS,
   TRAP_TYPES, carryableLabel, displayName, doorTrapId, isDoorTrapId, normaliseFriendName,
   type Carryable, type Direction, type LeaderboardRow, type LobbyMember, type LobbySummary,
@@ -41,7 +45,7 @@ import { KITS, FIELD_KIT_ID, kitById } from "./shared/loadouts.ts";
 import { movePlayer, type Facing } from "./shared/sim.ts";
 import "./style.css";
 
-type Screen = "briefing" | "lobby" | "match" | "escape" | "results";
+type Screen = "title" | "briefing" | "lobby" | "match" | "escape" | "results";
 type Menu = "crate" | "kits" | "settings" | "join" | "create" | "reveal" | "traps"
   | "leaderboard" | "codename" | null;
 
@@ -126,6 +130,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const audioRef = useRef<Audio | null>(null);
   const flashSeq = useRef(1);
   const spritesRef = useRef(new Map<string, any>());
+  /** Effect id to the local timestamp its animation started at. */
+  const effectStartsRef = useRef(new Map<number, number>());
   const readerRef = useRef<ReturnType<typeof createFriendReader> | null>(null);
   const mapRef = useRef<EmbassyMap | null>(null);
   const predictedRef = useRef<{ room: number; x: number; y: number; facing: Facing; walking: boolean }>(
@@ -138,14 +144,55 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const pausedRef = useRef(paused);
   const menuRef = useRef<Menu>(null);
   const reducedRef = useRef(false);
-  const screenRef = useRef<Screen>("briefing");
+  const screenRef = useRef<Screen>("title");
+  /** Cleared the first time the agent leaves the attract screen, and never shown again. */
+  const [atTitle, setAtTitle] = useState(true);
+  /** The training run, when one is in progress. It replaces the relay entirely. */
+  const [tutorial, setTutorial] = useState<TutorialState | null>(null);
+  const tutorialRef = useRef<TutorialState | null>(null);
+  tutorialRef.current = tutorial;
+  const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [tutorialDone, setTutorialDone] = useState(false);
+
+  /** Leave the training run and hand the screen back to the briefing. */
+  const endTutorial = useCallback(() => {
+    tutorialRef.current = null;
+    mapRef.current = null;
+    setTutorial(null);
+    setLesson(null);
+    setTutorialDone(false);
+    setMatch(null);
+    matchRef.current = null;
+  }, []);
+
+  const beginTutorial = useCallback(() => {
+    const state = startTutorial(0);
+    setTutorialDone(false);
+    setLesson(lessonOf(state));
+    setTutorial(state);
+    tutorialRef.current = state;
+    // The renderer needs the map, which in a live match arrives with match.start. The
+    // rehearsal has no relay, so take the map straight off the sim it is stepping.
+    mapRef.current = state.sim.map;
+    walkToRef.current = null;
+    setVisitedRooms(new Set<number>());
+    setResults(null);
+    // Publish the opening view synchronously. The match screen owns the canvas the render
+    // loop draws into, and the loop only runs on the match screen, so without a first
+    // snapshot here neither would ever start.
+    const view = tutorialSnapshot(state);
+    matchRef.current = view;
+    setMatch(view);
+    setFeed([]);
+  }, []);
 
   matchRef.current = match;
   pausedRef.current = paused;
   menuRef.current = menu;
   reducedRef.current = reducedMotion;
 
-  const screen: Screen = escape ? "escape" : results ? "results" : match ? "match" : lobby ? "lobby" : "briefing";
+  const screen: Screen = escape ? "escape" : results ? "results" : match ? "match"
+    : lobby ? "lobby" : atTitle ? "title" : "briefing";
   screenRef.current = screen;
 
   const inputBlocked = paused || menu !== null;
@@ -212,8 +259,15 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         break;
       }
       case "trap":
-        play(value.trap === "bucket" ? "trap-splash" : "trap-lethal");
+        play(`trap-${value.trap}` as SoundCue);
         pushFlash({ item: null, title: TRAP_LABELS[value.trap], detail: "You set it off", tone: "bad" });
+        break;
+      case "trap-sprung":
+        play("trap-sprung");
+        pushFlash({
+          item: null, title: `Your ${TRAP_LABELS[value.trap].toLowerCase()} fired`,
+          detail: "Somebody walked into it", tone: "good",
+        });
         break;
       case "hurt": play("hurt"); break;
       case "heal": play("heal"); break;
@@ -406,6 +460,10 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     }
   }, []);
 
+  // The title screen shows this Friend at portrait scale, so start the read on mount rather
+  // than waiting for the first match snapshot to ask for it.
+  useEffect(() => { ensureSprites([String(friendId)]); }, [ensureSprites, friendId]);
+
   /** Drop failed artwork so the render loop re-requests it. */
   const retryArtwork = useCallback(() => {
     for (const [id, entry] of [...spritesRef.current.entries()]) {
@@ -475,8 +533,20 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
 
   // ---- Input ----------------------------------------------------------------------------
   const sendAction = useCallback((action: Parameters<Net["send"]>[0] extends never ? never : any) => {
+    // The training run resolves actions locally; nothing about it touches the relay.
+    if (tutorialRef.current) { tutorialAction(tutorialRef.current, action); return; }
     netRef.current?.send({ t: "action", seq: seqRef.current++, action });
   }, []);
+
+  /**
+   * Swinging is predicted locally for its sound: waiting for the server to confirm the blow
+   * would put the swish a round trip behind the animation. Whether it connects is still the
+   * server's call, and arrives as a hurt/takedown cue.
+   */
+  const swing = useCallback(() => {
+    audioRef.current?.play(matchRef.current?.self.hasKnife ? "knife" : "search");
+    sendAction({ kind: "attack" });
+  }, [sendAction]);
 
   const primaryAction = useCallback(() => {
     const current = targetsRef.current;
@@ -516,7 +586,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       if (key === "escape") { setMenu(null); return; }
       if (menuRef.current) return;
       if (key === "e" || key === " ") { event.preventDefault(); primaryAction(); }
-      else if (key === "f") { event.preventDefault(); sendAction({ kind: "attack" }); }
+      else if (key === "f") { event.preventDefault(); swing(); }
       else if (key === "q") { event.preventDefault(); setMenu("traps"); }
       else if (key === "1" || key === "2" || key === "3") {
         event.preventDefault();
@@ -536,7 +606,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       document.removeEventListener("visibilitychange", clear);
       clear();
     };
-  }, [primaryAction, sendAction, plantTrap]);
+  }, [primaryAction, swing, plantTrap]);
 
   useEffect(() => { if (inputBlocked) heldRef.current.clear(); }, [inputBlocked]);
 
@@ -571,7 +641,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   // Input transmission at a fixed rate, independent of frame rate.
   useEffect(() => {
     const timer = setInterval(() => {
-      if (screenRef.current !== "match") return;
+      if (screenRef.current !== "match" || tutorialRef.current) return;
       const [dx, dy] = inputVector();
       netRef.current?.send({ t: "input", seq: seqRef.current++, dx, dy });
     }, INPUT_MS);
@@ -589,16 +659,59 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     let previous = performance.now();
     let stalledMs = 0;
     let lastX = 0, lastY = 0;
+    let publishDue = 0;
 
     const loop = (nowMs: number) => {
       const delta = Math.min(50, nowMs - previous);
       previous = nowMs;
+
+      // The training run has no relay: it steps its own sim here and publishes the same
+      // snapshot shape the server would have sent, so everything downstream is unchanged.
+      const rehearsal = tutorialRef.current;
+      if (rehearsal) {
+        const blocked = pausedRef.current || menuRef.current !== null;
+        const [dx, dy] = blocked ? [0, 0] : inputVector();
+        stepTutorial(rehearsal, delta, dx, dy);
+        // Drain the sim's own cues and events, exactly as the relay would have relayed them,
+        // so the rehearsal has the same sounds, flashes and log as a live match.
+        if (rehearsal.sim.cues.length) {
+          for (const entry of rehearsal.sim.cues) {
+            if (entry.to === TRAINEE) handleCue(entry);
+          }
+          rehearsal.sim.cues.length = 0;
+        }
+        if (rehearsal.sim.events.length) {
+          const mine = rehearsal.sim.events.filter(entry => !entry.to || entry.to === TRAINEE);
+          rehearsal.sim.events.length = 0;
+          if (mine.length) setFeed(current => [...current, ...mine].slice(-6));
+        }
+
+        const view = tutorialSnapshot(rehearsal);
+        matchRef.current = view;
+        // Publishing at the relay's tick rate rather than the display rate keeps the HUD
+        // re-rendering exactly as often as it does in a real match.
+        publishDue -= delta;
+        if (publishDue <= 0) {
+          publishDue = TICK_MS;
+          setMatch(view);
+          setLesson(lessonOf(rehearsal));
+          setTutorialDone(rehearsal.finished);
+        }
+        // Locally authoritative, so there is nothing to predict: take the sim's own position.
+        const agent = rehearsal.sim.players.get(TRAINEE)!;
+        predictedRef.current = {
+          room: agent.room, x: agent.x, y: agent.y,
+          facing: agent.facing, walking: agent.walking,
+        };
+      }
+
       const snapshot = matchRef.current;
       const embassy = mapRef.current;
       if (snapshot && embassy) {
         const self = snapshot.self;
         ensureSprites([self.friendId, ...snapshot.actors.map(actor => actor.friendId)]);
-        const canMove = !self.busy && self.stunnedMs <= 0 && self.respawnMs <= 0 && !pausedRef.current;
+        const canMove = !rehearsal && !self.busy && self.stunnedMs <= 0
+          && self.respawnMs <= 0 && !pausedRef.current;
         if (canMove) {
           const [dx, dy] = inputVector();
           movePlayer(embassy, predictedRef.current, dx, dy, delta);
@@ -640,6 +753,23 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         canvas.dataset.nearY = next.nearest ? String(next.nearest.y) : "";
         canvas.dataset.inReach = next.furniture ? "1" : "0";
 
+        // Effects arrive with the age they had when the snapshot was built. Anchor each id to a
+        // local start time the first time it is seen, so the animation runs at display rate
+        // rather than stepping once per snapshot, and drop anchors once an effect is gone.
+        const starts = effectStartsRef.current;
+        const live: ActiveEffect[] = [];
+        const seen = new Set<number>();
+        for (const entry of snapshot.effects) {
+          seen.add(entry.id);
+          let startedAt = starts.get(entry.id);
+          if (startedAt === undefined) {
+            startedAt = nowMs - entry.ageMs;
+            starts.set(entry.id, startedAt);
+          }
+          live.push({ kind: entry.kind, x: entry.x, y: entry.y, elapsedMs: nowMs - startedAt });
+        }
+        for (const id of starts.keys()) if (!seen.has(id)) starts.delete(id);
+
         drawEmbassy(context, {
           snapshot,
           selfX: predictedRef.current.x,
@@ -649,6 +779,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           nearestFurnitureId: targetsRef.current.furniture?.id ?? null,
           nearestDropId: targetsRef.current.drop?.id ?? null,
           nearestDoor: targetsRef.current.door,
+          effects: live,
           reducedMotion: reducedRef.current,
           timeMs: nowMs,
         });
@@ -657,7 +788,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [screen, inputVector, computeTargets, ensureSprites]);
+  }, [screen, inputVector, computeTargets, ensureSprites, handleCue]);
 
   const onCanvasPointer = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     if (inputBlocked || !matchRef.current) return;
@@ -778,6 +909,15 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
 
     {relayError && <p className="er-banner" role="alert">{relayError}</p>}
 
+    {screen === "title" && <TitleScreen
+      sprites={spritesRef.current} reducedMotion={reducedMotion} friendId={friendId}
+      codename={identity?.codename ?? "AGENT"} friendName={friendName}
+      career={careerOf(leaderboard, friendId)} netStatus={netStatus}
+      onStart={() => { void audioRef.current?.unlock(); setAtTitle(false); }}
+      onTutorial={() => { void audioRef.current?.unlock(); setAtTitle(false); beginTutorial(); }}
+      onStandings={() => setMenu("leaderboard")}
+    />}
+
     {screen === "briefing" && <BriefingScreen
       economy={economy} definition={definition} rf={rf} crateCount={crateCount} canBuy={canBuy}
       maxPrize={maxPrize} busy={busy} paused={paused} notice={notice}
@@ -787,6 +927,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       onBuy={() => void act(() => client.buy(1n), "purchase", "One simulated Gadget Crate added.")}
       onOpen={() => void openCrate()}
       onSetMenu={setMenu} onQuick={quickMatch} onJoin={joinLobby}
+      onTutorial={() => { void audioRef.current?.unlock(); beginTutorial(); }}
       pendingPlay={Boolean(pendingPlay)}
     />}
 
@@ -799,12 +940,16 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     {screen === "match" && match && <MatchScreen
       match={match} feed={feed} targets={targets} canvasRef={canvasRef}
       onCanvasPointer={onCanvasPointer} onPrimary={primaryAction}
-      onAttack={() => sendAction({ kind: "attack" })}
+      onAttack={swing}
       onTraps={() => setMenu("traps")}
       onDisarm={() => {
         const targetId = targets.trapHere?.targetId;
         if (targetId !== undefined) sendAction({ kind: "disarm", targetId });
       }}
+      lesson={lesson} lessonIndex={tutorial?.index ?? 0} lessonCount={LESSONS.length}
+      tutorialDone={tutorialDone}
+      onSkipLesson={() => { if (tutorialRef.current) advanceTutorial(tutorialRef.current); }}
+      onLeaveTutorial={endTutorial}
       onSettings={() => setMenu("settings")}
       stickRef={stickRef} inputBlocked={inputBlocked} reducedMotion={reducedMotion}
       netStatus={netStatus} artworkFailed={artworkFailed} onRetryArtwork={retryArtwork}
@@ -1087,7 +1232,7 @@ function BriefingScreen(props: any) {
   const {
     economy, definition, rf, crateCount, canBuy, maxPrize, busy, paused, notice, identity,
     friendId, equippedKit, ownedKits, lobbies, netStatus, onBuy, onOpen, onSetMenu, onQuick,
-    onJoin, pendingPlay, friendName, leaderboard,
+    onJoin, pendingPlay, friendName, leaderboard, onTutorial,
   } = props;
   const kit = kitById(equippedKit);
   return <div className="er-briefing">
@@ -1115,6 +1260,7 @@ function BriefingScreen(props: any) {
         <button type="button" disabled={busy || paused} onClick={() => onSetMenu("leaderboard")}>
           Standings{leaderboard?.length ? ` · ${leaderboard.length}` : ""}
         </button>
+        <button type="button" disabled={busy || paused} onClick={onTutorial}>Training run</button>
       </div>
       {!canBuy && <p className="er-fine">
         {economy.rfBalance < definition.price
@@ -1191,11 +1337,42 @@ function LobbyScreen({ lobby, identity, isHost, me, equippedKit, onKit, onReady,
   </div>;
 }
 
+/**
+ * The training run's objective card. It sits over the match HUD rather than replacing it, so
+ * every control being taught is visible and working while the lesson is on screen.
+ */
+function TrainingOverlay({ lesson, index, count, done, onSkip, onLeave }: any) {
+  if (done) {
+    return <div className="er-lesson er-lesson-done" role="status">
+      <h3>Training complete</h3>
+      <p>
+        That is the whole game: search the furniture, take the four items, trap what you leave
+        behind, and get to the courtyard gate before anyone else does.
+      </p>
+      <div className="er-row">
+        <button type="button" className="er-primary" onClick={onLeave}>Find a match</button>
+      </div>
+    </div>;
+  }
+  return <div className="er-lesson" role="status" aria-live="polite">
+    <div className="er-lesson-head">
+      <span className="er-lesson-step">Step {index + 1} of {count}</span>
+      <h3>{lesson.title}</h3>
+    </div>
+    <p>{lesson.body}</p>
+    <div className="er-row">
+      <button type="button" onClick={onSkip}>Skip step</button>
+      <button type="button" onClick={onLeave}>Leave training</button>
+    </div>
+  </div>;
+}
+
 function MatchScreen(props: any) {
   const {
     match, feed, targets, canvasRef, onCanvasPointer, onPrimary, onAttack, onTraps,
     onDisarm, onSettings, stickRef, inputBlocked, reducedMotion, netStatus,
     artworkFailed, onRetryArtwork, flashes, visitedRooms, exitRoom,
+    lesson, lessonIndex, lessonCount, tutorialDone, onSkipLesson, onLeaveTutorial,
   } = props;
   const self = match.self as MatchSnapshot["self"];
   const minutes = Math.floor(match.secondsLeft / 60);
@@ -1207,8 +1384,14 @@ function MatchScreen(props: any) {
   const canTrap = Boolean(targets.furniture || targets.door) && !targets.trapHere && trapTotal > 0;
 
   return <div className="er-match">
+    {(lesson || tutorialDone) && <TrainingOverlay
+      lesson={lesson} index={lessonIndex} count={lessonCount} done={tutorialDone}
+      onSkip={onSkipLesson} onLeave={onLeaveTutorial}
+    />}
     <div className="er-hud-top">
-      {netStatus !== "online" && <span className={`er-dot er-dot-${netStatus}`} title="Relay connection" />}
+      {/* A rehearsal has no relay, so its connection dot would always read as trouble. */}
+      {netStatus !== "online" && !lesson && !tutorialDone
+        && <span className={`er-dot er-dot-${netStatus}`} title="Relay connection" />}
       <span className="er-room">{match.roomName}</span>
       <span className={`er-timer${match.secondsLeft <= 30 ? " er-timer-low" : ""}`}>{minutes}:{seconds}</span>
       <Minimap roomIndex={match.roomIndex} exitRoom={exitRoom} visited={visitedRooms} />
@@ -1332,6 +1515,60 @@ function Stick({ stickRef, disabled, reducedMotion }: any) {
       transform: `translate(${knob.x}px, ${knob.y}px)`,
       transition: reducedMotion ? "none" : "transform 60ms linear",
     }} />
+  </div>;
+}
+
+/**
+ * The first thing anybody sees. It runs before a lobby exists and needs no relay, so it is
+ * also what shows while the connection is still coming up.
+ */
+/** This Friend's own row out of the career standings, if it has ever finished a match. */
+function careerOf(
+  rows: readonly LeaderboardRow[] | null, friendId: bigint,
+): LeaderboardRow | null {
+  return rows?.find(row => row.friendId === friendId.toString()) ?? null;
+}
+
+function TitleScreen({
+  sprites, reducedMotion, friendId, codename, friendName, career,
+  onStart, onTutorial, onStandings, netStatus,
+}: any) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    let frame = 0;
+    const tick = (nowMs: number) => {
+      drawTitleScreen(context, {
+        timeMs: nowMs, reducedMotion,
+        sprites: sprites.get(String(friendId)),
+        codename, friendName, friendId: String(friendId),
+      });
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [sprites, reducedMotion, friendId, codename, friendName]);
+
+  return <div className="er-title">
+    <canvas ref={ref} width={VIEW_W} height={VIEW_H} className="er-canvas"
+      aria-label={`Embassy Run. Spy versus spy, run by Rare Friends. Playing as ${codename}, Rare Friend number ${friendId}.`} />
+    <div className="er-title-actions">
+      <button type="button" className="er-primary" onClick={onStart}>Enter the embassy</button>
+      <button type="button" onClick={onTutorial}>Training run</button>
+      <button type="button" onClick={onStandings}>Standings</button>
+    </div>
+    <p className="er-title-foot">
+      <strong>{codename}{friendName ? ` (${friendName})` : ""}</strong>
+      {" · "}Rare Friend #{String(friendId)}
+      <br />
+      {career
+        ? `${career.matches} ${career.matches === 1 ? "mission" : "missions"} · ${career.points} career points · ${career.escapes} clean escapes`
+        : "No missions on record yet. The training run explains everything in about a minute."}
+      {netStatus !== "online" && " · connecting to the relay…"}
+    </p>
   </div>;
 }
 

@@ -13,8 +13,13 @@
  */
 
 export type SoundCue =
-  | "pickup" | "pickup-major" | "trap-lethal" | "trap-splash" | "hurt" | "heal"
-  | "takedown" | "downed" | "plant" | "search" | "door" | "deny" | "escape" | "lose";
+  | "pickup" | "pickup-major"
+  /** One per trap type, so the kind of trap is audible before you read the log. */
+  | "trap-bomb" | "trap-spring" | "trap-bucket"
+  /** Your own trap catching somebody else, heard from anywhere on the map. */
+  | "trap-sprung"
+  | "hurt" | "heal" | "knife" | "takedown" | "downed" | "plant" | "search" | "door"
+  | "deny" | "escape" | "lose";
 
 const BPM = 92;
 const BEAT = 60 / BPM;
@@ -203,13 +208,28 @@ export function createAudio() {
           tone(hz(N.G4), at + 0.07, 0.08, { gain: 0.2 });
           tone(hz(N.B4), at + 0.14, 0.22, { gain: 0.22 });
           break;
-        case "trap-lethal":
+        // A deep detonation: broadband thump with the pitch dropping out from under it.
+        case "trap-bomb":
           noise(at, 0.5, { gain: 0.5, frequency: 380, q: 0.6, type: "lowpass" });
           tone(hz(N.E2), at, 0.4, { type: "sawtooth", gain: 0.28, glideTo: hz(N.E1) });
           break;
-        case "trap-splash":
+        // A spring-gun: tight metallic twang, pitch snapping upward, then the bolt landing.
+        case "trap-spring":
+          tone(hz(N.E3), at, 0.09, { type: "square", gain: 0.24, glideTo: hz(N.B4) });
+          noise(at + 0.05, 0.12, { gain: 0.26, frequency: 1800, q: 2.4 });
+          tone(hz(N.E2), at + 0.12, 0.26, { type: "sawtooth", gain: 0.2, glideTo: hz(N.A1) });
+          break;
+        // A bucket: wet slap, then the pail rocking on the floorboards.
+        case "trap-bucket":
           noise(at, 0.32, { gain: 0.3, frequency: 2600, q: 0.8 });
           tone(hz(N.B3), at, 0.22, { type: "sine", gain: 0.12, glideTo: hz(N.E3) });
+          tone(hz(N.G3), at + 0.26, 0.1, { type: "triangle", gain: 0.1 });
+          tone(hz(N.E3), at + 0.38, 0.12, { type: "triangle", gain: 0.08 });
+          break;
+        // Heard by the agent who set it: two rising notes, unmistakably good news.
+        case "trap-sprung":
+          tone(hz(N.B3), at, 0.08, { type: "square", gain: 0.16 });
+          tone(hz(N.Fs3), at + 0.08, 0.16, { type: "square", gain: 0.16 });
           break;
         case "hurt":
           tone(hz(N.A3), at, 0.14, { type: "sawtooth", gain: 0.2, glideTo: hz(N.E3) });
@@ -219,6 +239,11 @@ export function createAudio() {
           tone(hz(N.E3), at, 0.1, { type: "triangle", gain: 0.2 });
           tone(hz(N.B3), at + 0.09, 0.1, { type: "triangle", gain: 0.2 });
           tone(hz(N.E4), at + 0.18, 0.2, { type: "triangle", gain: 0.2 });
+          break;
+        // The stiletto: a fast filtered swish, quite unlike the dull thud of a fist.
+        case "knife":
+          noise(at, 0.14, { gain: 0.24, frequency: 4200, q: 3.2 });
+          tone(hz(N.B4), at, 0.1, { type: "sawtooth", gain: 0.12, glideTo: hz(N.E4) });
           break;
         case "takedown":
           tone(hz(N.E3), at, 0.1, { gain: 0.22 });
