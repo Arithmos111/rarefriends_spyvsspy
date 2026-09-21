@@ -12,7 +12,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { chromium } from "playwright";
+import { launchChromium } from "./browser.mjs";
 import { decodeFunctionData, encodeFunctionResult } from "viem";
 import { attachRelay, GAME_DIR, loadSdkRunner } from "./host.mjs";
 import { project } from "../games/rare-agency/render.ts";
@@ -56,7 +56,7 @@ try {
   const origin = `http://127.0.0.1:${server.address().port}`;
   step(`serving ${origin}`);
 
-  browser = await chromium.launch({ headless: true });
+  browser = await launchChromium({ headless: true });
 
   async function openAgent({ width, touch, second }) {
     const context = await browser.newContext({

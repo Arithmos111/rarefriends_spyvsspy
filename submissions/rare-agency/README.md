@@ -2,11 +2,11 @@
 
 Up to four Rare Friends raid one embassy for four pieces of hidden intelligence, booby-trapping the furniture and doorways behind them, racing to escape through the courtyard gate before the others.
 
-**Builder:** [@Arithmos111](https://github.com/Arithmos111) · **Category:** Character Spotlight (also entered for Economy Potential) · **SDK:** FriendSDK v0.1 (0.1.0)
+**Builder:** [@Arithmos111](https://github.com/Arithmos111) · [@arithmos0x](https://x.com/arithmos0x) on X · `arithmosxtg` on Telegram · **Category:** Character Spotlight (also entered for Economy Potential) · **SDK:** FriendSDK v0.1.2
 
 Your selected Generations Friend is the spy, drawn from its own canonical on-chain sprites, and every rival agent in the room is drawn from theirs. Matchmaking lobbies let dozens of players run separate four-player embassies at once. [Source code](https://github.com/Arithmos111/rarefriends_spyvsspy/tree/REPLACE_SHA) · [Game rules](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/rare-agency/game.json) · [Full rules and controls](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/rare-agency/README.md)
 
-**Playable preview: <https://rareagency.rwplay.net>** — needs a browser wallet holding a hardwired Rare Friends Generations NFT (generation ≥ 1) on **Robinhood mainnet, chain 4663**. Switch networks before connecting: on any other chain the SDK reports "No playable Friends found" even when you hold several. Multiplayer needs a second player; open the link on a phone as well to play against yourself.
+**Playable preview: <https://rareagency.rwplay.net>** — needs a browser wallet holding a hardwired Rare Friends Generations NFT (generation ≥ 1) on **Robinhood mainnet, chain 4663**. Switch networks before connecting; the SDK offers a **Switch to Robinhood** button if you are on the wrong one. Multiplayer needs a second player; open the link on a phone as well to play against yourself.
 
 ## Run it
 
@@ -20,7 +20,7 @@ npm run setup
 npm run dev
 ```
 
-`npm run setup` fetches, builds and installs FriendSDK at pinned commit `da4828f8ec49d8ac5c24556908bd4cd653f8db67`. The SDK is published UNLICENSED, so it is fetched rather than vendored into this repository.
+`npm run setup` fetches, builds and installs FriendSDK v0.1.2 at pinned commit `762d6f58a73ace723f7f82dc1a61bfa036c21edc`. The SDK is published UNLICENSED, so it is fetched rather than vendored into this repository.
 
 Open the printed URL (normally `http://localhost:4173`), connect your wallet and select your Friend. The SDK verifies ownership before play. No RF funding or transaction signature is needed for this simulated preview.
 
@@ -68,9 +68,9 @@ Weights total exactly **10,000 basis points**. Expected reward **0.905 RF per cr
 
 `npm run check` runs typecheck, **62 simulation tests**, game validation and two browser checks. All pass. The simulation tests cover map determinism, walkability and furniture reachability, doorways and two-way doorway traps, searching, combat and drops, power-ups, escaping, the timer, career scoring, and step-for-step agreement between the client's prediction and the server. Game validation reports `games/rare-agency: valid`, weights totalling 10,000 bps, expected reward 0.905 RF and a maximum prize of 8 RF. The browser check drives **two** real browsers through the SDK ownership gate, asserts container bounds at desktop and phone widths, buys and opens a crate, walks the nine-step training run, creates and joins a lobby and plays a live match; a second check proves the reverse-proxy topology the hosted preview runs behind.
 
-Browser tests use the SDK's own internal identity fixture for mocked wallets and RPC. **A real-wallet playthrough has been done against the hosted preview above**, which is how the wrong-network problem in the feedback below was found.
+Browser tests use the SDK's own internal identity fixture for mocked wallets and RPC. **A real-wallet playthrough has been done against the hosted preview above**, which is how the wrong-network problem in the feedback below was found — since fixed upstream in v0.1.2, which this entry now runs on.
 
-**Known issues.** The relay verifies that a claimed Generations token exists and reads its owner over RPC, but cannot prove the connected player controls it, because the sandbox exposes no signer — so career standings inherit that gap. An RPC outage blocks the SDK's picker entirely, though players already in a match keep playing. The Genesis perk (one extra letter bomb, plus a badge) is inactive until `RF_GENESIS_ADDRESS` is configured, since FriendSDK v0.1 publishes no Genesis address. Audio and motion preferences reset on reload, because the sandbox's opaque origin makes `localStorage` throw. A restart ends matches in progress. Full list: [known issues and capability gaps](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/rare-agency/README.md#known-issues-and-capability-gaps).
+**Known issues.** The relay verifies that a claimed Generations token exists and reads its owner over RPC, but cannot prove the connected player controls it, because the sandbox exposes no signer — so career standings inherit that gap. An RPC outage blocks the SDK's picker entirely, though players already in a match keep playing. The Genesis perk (one extra letter bomb, plus a badge) is inactive until `RF_GENESIS_ADDRESS` is configured, since FriendSDK publishes no Genesis address. Audio and motion preferences reset on reload, because the sandbox's opaque origin makes `localStorage` throw. A restart ends matches in progress. Full list: [known issues and capability gaps](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/rare-agency/README.md#known-issues-and-capability-gaps).
 
 **Feedback for the SDK team** — three things that cost real time and cannot be worked around from inside a game: [docs/SDK-FEEDBACK.md](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/docs/SDK-FEEDBACK.md).
 

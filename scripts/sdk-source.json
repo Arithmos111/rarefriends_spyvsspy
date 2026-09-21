@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/spokesz/friendsdk.git",
-  "commit": "da4828f8ec49d8ac5c24556908bd4cd653f8db67",
-  "version": "0.1.0",
+  "commit": "762d6f58a73ace723f7f82dc1a61bfa036c21edc",
+  "version": "0.1.2",
   "note": "FriendSDK v0.1 is UNLICENSED, so it is fetched and built locally rather than vendored into this repository."
 }

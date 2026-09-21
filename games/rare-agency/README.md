@@ -23,12 +23,12 @@ Open the printed URL. Connect a wallet holding a hardwired Rare Friends Generati
 NFT (generation 1 or higher) on Robinhood mainnet (chain 4663), choose your Friend,
 then create or join a lobby.
 
-> **Be on Robinhood mainnet, chain 4663, before you connect.** The SDK only looks up your
-> Friends once the wallet reports that chain. On any other network it skips discovery
-> entirely but still shows "No playable Friends found", which is easy to read as "you own
-> none". A Friend also has to be **hardwired**, meaning it has a permanent token-bound
-> wallet; a temporary, balance-dependent Friend is not eligible. Open the same URL on a second device or browser to play
-against yourself. The printed LAN URL works from a phone on the same wifi.
+> **Your wallet must be on Robinhood mainnet, chain 4663, with a hardwired Friend of
+> generation 1 or higher.** From FriendSDK v0.1.2 the picker names the chain you are on and
+> offers a **Switch to Robinhood** button, and reports generation-0 holdings separately.
+
+Open the same URL on a second device or browser to play against yourself. The printed LAN
+URL works from a phone on the same wifi.
 
 ## Choosing your agent
 
@@ -260,6 +260,11 @@ the embassy.
 
 ## Checks
 
+The browser-driven checks need a Chromium that Playwright manages: run
+`npx playwright install chromium` once. On a machine that ships its own Chromium and blocks
+browser downloads, set `CHROMIUM_EXECUTABLE` to that binary and the checks will use it
+instead. It is unset by default, so it cannot quietly hide a version mismatch.
+
 Run from the repository root:
 
 ```sh
@@ -315,13 +320,10 @@ widths.
   initial Friend, an ordering or a row renderer. The title screen shows the selected
   Friend's artwork at portrait scale, which is the nearest a game can get. Raised as
   SDK feedback in the submission.
-- **A wrong-network wallet looks identical to owning no Friends.** The SDK runtime shows
-  "Switch your wallet to Robinhood mainnet (4663)" and "No playable Friends found" at the
-  same time, because discovery only runs once the wallet reports chain 4663 and otherwise
-  never queries at all. The definitive-sounding second message is the one people read. This
-  cost real time during our first live deployment. The gate is trusted runtime code, so a
-  game cannot correct it; suppressing the empty-list message whenever the wallet is on the
-  wrong chain would fix it in the SDK.
+- **A wrong-network wallet used to look identical to owning no Friends.** Fixed upstream in
+  FriendSDK v0.1.2, which this game now runs on: the picker names the chain you are on and
+  offers a **Switch to Robinhood** button. Your Friend must still be **hardwired**,
+  generation 1 or higher; generation 0 holdings are reported separately.
 
 ## Assets
 

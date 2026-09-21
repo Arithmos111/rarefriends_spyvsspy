@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { chromium } from "playwright";
+import { launchChromium } from "./browser.mjs";
 import { decodeFunctionData, encodeFunctionResult } from "viem";
 import { attachRelay, GAME_DIR, loadSdkRunner } from "./host.mjs";
 import { project } from "../games/rare-agency/render.ts";
@@ -36,7 +36,7 @@ try {
   const relay = attachRelay(server, { log: () => {} });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch({ headless: true });
+  browser = await launchChromium({ headless: true });
 
   const open = async ({ width, height, second, touch }) => {
     const context = await browser.newContext({ viewport: { width, height }, hasTouch: touch, deviceScaleFactor: 2 });

@@ -16,7 +16,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { chromium } from "playwright";
+import { launchChromium } from "./browser.mjs";
 import { decodeFunctionData, encodeFunctionResult } from "viem";
 import { attachRelay, GAME_DIR, loadSdkRunner } from "./host.mjs";
 
@@ -75,7 +75,7 @@ try {
   const origin = `http://127.0.0.1:${proxy.address().port}`;
   console.log(`  proxy (stands in for Caddy) listening on ${proxy.address().port}`);
 
-  browser = await chromium.launch({ headless: true });
+  browser = await launchChromium({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1100, height: 820 }, reducedMotion: "reduce" });
   const page = await context.newPage();
   const errors = [];

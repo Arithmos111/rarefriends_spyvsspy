@@ -2,7 +2,7 @@
 
 A four-player **Spy vs Spy–style** stealth game for the
 [Rare Friends Vibeathon](https://github.com/spokesz/rarefriends-vibeathon), built on
-[FriendSDK v0.1](https://github.com/spokesz/friendsdk).
+[FriendSDK v0.1.2](https://github.com/spokesz/friendsdk).
 
 Your Rare Friend is a spy inside a nine-room embassy. Four pieces of intelligence are hidden in
 the furniture. Search for them, booby-trap the furniture and doorways behind you, and reach the
@@ -32,10 +32,9 @@ The game opens on a title screen showing your own Friend at portrait scale, with
 run** beside it: a nine-step walkthrough of every control that runs entirely in the browser
 against the real simulation, needing no relay, no lobby and no second player.
 
-> **Switch your wallet to Robinhood mainnet (chain 4663) before connecting.** On any other
-> network the SDK never queries your holdings, yet still reports "No playable Friends found",
-> which reads like you own nothing. If you hold Friends and the game says you do not, check
-> the network first. See [known issues](games/rare-agency/README.md#known-issues-and-capability-gaps).
+> **Your wallet must be on Robinhood mainnet, chain 4663.** From v0.1.2 the SDK names the
+> chain you are on and offers a **Switch to Robinhood** button, so this is a click rather
+> than a hunt. Your Friend must also be **hardwired**, generation 1 or higher.
 
 ```sh
 npm run setup
@@ -154,7 +153,7 @@ connects a wallet, enumerates token IDs, or implements its own gate.
 
 **Genesis** holders get a perk rather than a separate door: the relay reads the owner
 of the selected Friend and checks their Genesis balance, granting an extra letter bomb
-and a GENESIS badge. FriendSDK v0.1 publishes no Genesis contract address, so set
+and a GENESIS badge. FriendSDK publishes no Genesis contract address, so set
 `RF_GENESIS_ADDRESS` to switch the perk on; without it every agent is treated as a
 non-holder.
 

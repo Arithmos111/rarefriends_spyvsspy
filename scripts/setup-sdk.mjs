@@ -7,7 +7,7 @@
  * the SDK's own README describes, and installs it into this project.
  */
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rm, access } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -54,15 +54,35 @@ await sh("npm", ["ci"], checkout);
 step("Building FriendSDK");
 await sh("npm", ["run", "build"], checkout);
 
+/** Version-independent, so package.json never has to be edited alongside the pin. */
+const SDK_TARBALL = "rarefriends-friendsdk.tgz";
+
 step("Packing FriendSDK");
 const packed = path.join(vendor, `rarefriends-friendsdk-${source.version}.tgz`);
 await rm(packed, { force: true });
 await sh("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], checkout);
 if (!(await exists(packed))) throw new Error(`npm pack did not produce ${packed}.`);
 
+// package.json depends on a version-independent filename. Naming the tarball after the
+// version meant the dependency spec had to be edited in lockstep with sdk-source.json, and
+// when it was not, npm quietly installed the previous SDK while this script reported the new
+// one as ready. One name, one source of truth.
+const stable = path.join(vendor, SDK_TARBALL);
+await rm(stable, { force: true });
+await copyFile(packed, stable);
+await rm(packed, { force: true });
+
 step("Installing project dependencies");
-// package.json declares the SDK as file:vendor/..., so a plain install picks up the tarball
-// just packed above and keeps it installed on later npm runs.
 await sh("npm", ["install"], root);
+
+// Prove the install actually took. A silent mismatch here is exactly the failure above.
+const installedPath = path.join(root, "node_modules", "@rarefriends", "friendsdk", "package.json");
+const installed = JSON.parse(await readFile(installedPath, "utf8")).version;
+if (installed !== source.version) {
+  throw new Error(
+    `Installed FriendSDK is ${installed}, but scripts/sdk-source.json pins ${source.version}. `
+    + `Delete node_modules/@rarefriends and run npm run setup again.`,
+  );
+}
 
 console.log(`\n\x1b[38;5;154m✓ FriendSDK v${source.version} ready.\x1b[0m Run \x1b[1mnpm run dev\x1b[0m to play.\n`);
