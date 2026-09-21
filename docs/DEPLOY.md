@@ -57,9 +57,45 @@ too; step 4 covers it.
 
 ### 3. Open the firewall
 
-In hPanel under your VPS, open the firewall settings and allow inbound **22** (SSH), **80** and
-**443** (TCP, and UDP 443 if you want HTTP/3). Port 80 is required: Caddy uses it for the
-certificate challenge and to redirect visitors to HTTPS.
+A new Hostinger VPS has **no firewall at all**, so every port is exposed until you create one.
+Worth doing, and note that `ufw` is the wrong tool here: Docker writes its own iptables rules
+that `ufw` does not see, so published container ports stay reachable regardless. Hostinger's
+firewall sits upstream of the machine and is not bypassed, so configure it there and leave
+`ufw` alone.
+
+Hostinger drops all inbound traffic by default, so every port you want must be accepted
+explicitly. This rule set is verified working:
+
+| Action | Protocol | Port | Source |
+| --- | --- | --- | --- |
+| Accept | TCP | 443 | Any |
+| Accept | TCP | 80 | Any |
+| Accept | UDP | 443 | Any |
+| Drop | Any | Any | Any |
+
+**Port 80 is required even though the site is HTTPS.** Caddy renews roughly every 60 days and
+needs it reachable. Close it and the site works fine for two months, then breaks quietly.
+UDP 443 is HTTP/3 and optional; clients fall back to HTTP/2 cleanly without it.
+
+**SSH can be left out.** hPanel's browser terminal does not reach the VPS over public port 22,
+so omitting a rule for it still leaves you a working shell. This is verified. Test it before
+relying on it: open a second browser terminal in a new tab after applying the firewall, rather
+than trusting the session you already have open. The firewall is managed in hPanel, out of band
+from the machine, so a lockout is always recoverable by editing the rules there.
+
+Closing 22 costs you `scp`, `rsync` and git over SSH from your own machine. If you would rather
+keep it, add `Accept / TCP / 22 / Any` and disable password authentication instead:
+
+```sh
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+systemctl restart ssh
+```
+
+Only do that with a working SSH key in place.
+
+These are inbound rules, so the relay's outbound calls to the Rare Friends RPC are unaffected.
+If Genesis badges ever stop appearing after a firewall change, check `docker compose logs game`
+for RPC errors.
 
 ### 4. Install Docker, if the template did not
 
