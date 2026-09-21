@@ -25,14 +25,15 @@ import {
   tutorialSnapshot, type Lesson, type TutorialState,
 } from "./tutorial.ts";
 import {
-  drawCarryableGlyph, drawEmbassy, drawEscapeScene, drawTitleScreen, doorAnchorWorld,
-  ESCAPE_DURATION_MS, unproject, VIEW_H, VIEW_W, type ActiveEffect,
+  drawAgentPortrait, drawCarryableGlyph, drawEmbassy, drawEscapeScene, drawTitleScreen,
+  doorAnchorWorld, ESCAPE_DURATION_MS, unproject, VIEW_H, VIEW_W, type ActiveEffect,
 } from "./render.ts";
 import { createAudio, type Audio, type SoundCue } from "./audio.ts";
 import {
   DIRECTIONS, INPUT_MS, INTERACT_RANGE, MATCH_SECONDS, MAX_FRIEND_NAME, MISSION_ITEMS, TICK_MS,
   MISSION_ITEM_LABELS, POWER_UP_BLURBS, POWER_UP_LABELS, ROOM_H, ROOM_W, TRAP_LABELS,
-  TRAP_TYPES, carryableLabel, displayName, doorTrapId, isDoorTrapId, normaliseFriendName,
+  TRAP_TYPES, canonicalDoorTrapId, carryableLabel, displayName, isDoorTrapId,
+  normaliseFriendName,
   type Carryable, type Direction, type LeaderboardRow, type LobbyMember, type LobbySummary,
   type MatchCue, type MatchEvent, type MatchSnapshot, type PowerUp, type PublicPlayer,
   type ServerMessage, type TrapType,
@@ -45,7 +46,7 @@ import { KITS, FIELD_KIT_ID, kitById } from "./shared/loadouts.ts";
 import { movePlayer, type Facing } from "./shared/sim.ts";
 import "./style.css";
 
-type Screen = "title" | "briefing" | "lobby" | "match" | "escape" | "results";
+type Screen = "confirm" | "title" | "briefing" | "lobby" | "match" | "escape" | "results";
 type Menu = "crate" | "kits" | "settings" | "join" | "create" | "reveal" | "traps"
   | "leaderboard" | "codename" | null;
 
@@ -147,12 +148,16 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const screenRef = useRef<Screen>("title");
   /** Cleared the first time the agent leaves the attract screen, and never shown again. */
   const [atTitle, setAtTitle] = useState(true);
+  /** Cleared once the player has seen and accepted which agent the SDK handed them. */
+  const [confirmed, setConfirmed] = useState(false);
   /** The training run, when one is in progress. It replaces the relay entirely. */
   const [tutorial, setTutorial] = useState<TutorialState | null>(null);
   const tutorialRef = useRef<TutorialState | null>(null);
   tutorialRef.current = tutorial;
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [tutorialDone, setTutorialDone] = useState(false);
+  /** Collapses the objective card so the room underneath can be experimented with. */
+  const [lessonHidden, setLessonHidden] = useState(false);
 
   /** Leave the training run and hand the screen back to the briefing. */
   const endTutorial = useCallback(() => {
@@ -192,7 +197,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   reducedRef.current = reducedMotion;
 
   const screen: Screen = escape ? "escape" : results ? "results" : match ? "match"
-    : lobby ? "lobby" : atTitle ? "title" : "briefing";
+    : lobby ? "lobby" : !confirmed ? "confirm" : atTitle ? "title" : "briefing";
   screenRef.current = screen;
 
   const inputBlocked = paused || menu !== null;
@@ -519,7 +524,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     // permanently shadowed by it.
     const preferDoor = door !== null && doorGap < nearestGap;
     const targetId = preferDoor && door
-      ? doorTrapId(snapshot.roomIndex, door)
+      ? canonicalDoorTrapId(snapshot.roomIndex, door)
       : furniture?.id ?? null;
     return {
       furniture: preferDoor ? null : furniture,
@@ -559,7 +564,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     const current = targetsRef.current;
     const snapshot = matchRef.current;
     const targetId = current.door && snapshot
-      ? doorTrapId(snapshot.roomIndex, current.door)
+      ? canonicalDoorTrapId(snapshot.roomIndex, current.door)
       : current.furniture?.id ?? null;
     if (targetId === null) return;
     sendAction({ kind: "plant", targetId, trap });
@@ -909,6 +914,13 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
 
     {relayError && <p className="er-banner" role="alert">{relayError}</p>}
 
+    {screen === "confirm" && <ConfirmScreen
+      sprites={spritesRef.current} reducedMotion={reducedMotion} friendId={friendId}
+      codename={identity?.codename ?? "AGENT"} friendName={friendName}
+      genesis={Boolean(identity?.genesis)} career={careerOf(leaderboard, friendId)}
+      onConfirm={() => { void audioRef.current?.unlock(); setConfirmed(true); }}
+    />}
+
     {screen === "title" && <TitleScreen
       sprites={spritesRef.current} reducedMotion={reducedMotion} friendId={friendId}
       codename={identity?.codename ?? "AGENT"} friendName={friendName}
@@ -947,7 +959,9 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         if (targetId !== undefined) sendAction({ kind: "disarm", targetId });
       }}
       lesson={lesson} lessonIndex={tutorial?.index ?? 0} lessonCount={LESSONS.length}
-      tutorialDone={tutorialDone}
+      tutorialDone={tutorialDone} lessonHidden={lessonHidden}
+      onHideLesson={() => setLessonHidden(true)}
+      onShowLesson={() => setLessonHidden(false)}
       onSkipLesson={() => { if (tutorialRef.current) advanceTutorial(tutorialRef.current); }}
       onLeaveTutorial={endTutorial}
       onSettings={() => setMenu("settings")}
@@ -1341,7 +1355,17 @@ function LobbyScreen({ lobby, identity, isHost, me, equippedKit, onKit, onReady,
  * The training run's objective card. It sits over the match HUD rather than replacing it, so
  * every control being taught is visible and working while the lesson is on screen.
  */
-function TrainingOverlay({ lesson, index, count, done, onSkip, onLeave }: any) {
+function TrainingOverlay({ lesson, index, count, done, hidden, onHide, onShow, onSkip, onLeave }: any) {
+  if (!done && hidden) {
+    // Collapsed to a slim bar so the room is clear to experiment in. The objective is still
+    // named, because a hidden card should never leave anyone wondering what they were doing.
+    return <div className="er-lesson-bar">
+      <span className="er-lesson-step">Step {index + 1}/{count}</span>
+      <strong>{lesson.title}</strong>
+      <button type="button" onClick={onShow}>Show</button>
+      <button type="button" onClick={onSkip}>Next step</button>
+    </div>;
+  }
   if (done) {
     return <div className="er-lesson er-lesson-done" role="status">
       <h3>Training complete</h3>
@@ -1361,7 +1385,8 @@ function TrainingOverlay({ lesson, index, count, done, onSkip, onLeave }: any) {
     </div>
     <p>{lesson.body}</p>
     <div className="er-row">
-      <button type="button" onClick={onSkip}>Skip step</button>
+      <button type="button" className="er-primary" onClick={onHide}>Got it — let me try</button>
+      <button type="button" onClick={onSkip}>Next step</button>
       <button type="button" onClick={onLeave}>Leave training</button>
     </div>
   </div>;
@@ -1372,7 +1397,8 @@ function MatchScreen(props: any) {
     match, feed, targets, canvasRef, onCanvasPointer, onPrimary, onAttack, onTraps,
     onDisarm, onSettings, stickRef, inputBlocked, reducedMotion, netStatus,
     artworkFailed, onRetryArtwork, flashes, visitedRooms, exitRoom,
-    lesson, lessonIndex, lessonCount, tutorialDone, onSkipLesson, onLeaveTutorial,
+    lesson, lessonIndex, lessonCount, tutorialDone, lessonHidden,
+    onHideLesson, onShowLesson, onSkipLesson, onLeaveTutorial,
   } = props;
   const self = match.self as MatchSnapshot["self"];
   const minutes = Math.floor(match.secondsLeft / 60);
@@ -1386,6 +1412,7 @@ function MatchScreen(props: any) {
   return <div className="er-match">
     {(lesson || tutorialDone) && <TrainingOverlay
       lesson={lesson} index={lessonIndex} count={lessonCount} done={tutorialDone}
+      hidden={lessonHidden} onHide={onHideLesson} onShow={onShowLesson}
       onSkip={onSkipLesson} onLeave={onLeaveTutorial}
     />}
     <div className="er-hud-top">
@@ -1522,6 +1549,59 @@ function Stick({ stickRef, disabled, reducedMotion }: any) {
  * The first thing anybody sees. It runs before a lobby exists and needs no relay, so it is
  * also what shows while the connection is still coming up.
  */
+/**
+ * Shown once, before the title screen, so a player sees the agent they just chose.
+ *
+ * The SDK's picker lists Friends as text only, and the game cannot change that: the picker is
+ * trusted runtime code outside the sandbox, and the game is handed a verified Friend with no
+ * channel back. What the game can do is confirm the choice straight afterwards, and say
+ * exactly which control switches it.
+ */
+function ConfirmScreen({
+  sprites, reducedMotion, friendId, codename, friendName, genesis, career, onConfirm,
+}: any) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    let frame = 0;
+    const tick = (nowMs: number) => {
+      drawAgentPortrait(context, {
+        timeMs: nowMs, reducedMotion, sprites: sprites.get(String(friendId)),
+      });
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [sprites, reducedMotion, friendId]);
+
+  return <div className="er-confirm">
+    <canvas ref={ref} width={VIEW_W} height={VIEW_H} className="er-canvas"
+      aria-label={`Your agent: ${codename}, Rare Friend number ${friendId}.`} />
+    <div className="er-confirm-card">
+      <p className="er-confirm-kicker">Your agent</p>
+      <h2>
+        {codename}{friendName ? ` (${friendName})` : ""}
+        {genesis && <span className="er-badge">GENESIS</span>}
+      </h2>
+      <p className="er-confirm-id">Rare Friend #{String(friendId)}</p>
+      {career
+        ? <p className="er-fine">
+          {career.matches} {career.matches === 1 ? "mission" : "missions"} on record ·{" "}
+          {career.points} career points
+        </p>
+        : <p className="er-fine">No missions on record yet.</p>}
+      <button type="button" className="er-primary" onClick={onConfirm}>Deploy this agent</button>
+      <p className="er-fine er-confirm-swap">
+        Wrong one? Use the <strong>Friend #{String(friendId)}</strong> button in the bar below
+        the game to pick another.
+      </p>
+    </div>
+  </div>;
+}
+
 /** This Friend's own row out of the career standings, if it has ever finished a match. */
 function careerOf(
   rows: readonly LeaderboardRow[] | null, friendId: bigint,

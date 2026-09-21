@@ -5,6 +5,7 @@ const sim = await import("../games/rare-agency/shared/sim.ts");
 const map = await import("../games/rare-agency/shared/mansion.ts");
 const P = await import("../games/rare-agency/shared/protocol.ts");
 const kits = await import("../games/rare-agency/shared/loadouts.ts");
+const view = await import("../games/rare-agency/shared/view.ts");
 
 const roster = (...entries) => entries.map((entry, index) => ({
   playerId: entry.id, friendId: String(index + 1), codename: entry.id.toUpperCase(),
@@ -419,7 +420,7 @@ test("a trap on a doorway fires on whoever walks through it", () => {
   const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
   const planter = match.players.get("a");
   const victim = match.players.get("b");
-  const doorId = P.doorTrapId(0, "east");
+  const doorId = P.canonicalDoorTrapId(0, "east");
   planter.room = 0; planter.x = P.ROOM_W; planter.y = P.ROOM_H / 2;
   sim.applyAction(match, "a", { kind: "plant", targetId: doorId, trap: "bomb" });
   run(match, P.PLANT_MS + 100);
@@ -436,7 +437,7 @@ test("a trap on a doorway fires on whoever walks through it", () => {
 test("a doorway trap catches the agent who set it as well", () => {
   const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
   const planter = match.players.get("a");
-  const doorId = P.doorTrapId(0, "east");
+  const doorId = P.canonicalDoorTrapId(0, "east");
   planter.room = 0; planter.x = P.ROOM_W; planter.y = P.ROOM_H / 2;
   sim.applyAction(match, "a", { kind: "plant", targetId: doorId, trap: "bomb" });
   run(match, P.PLANT_MS + 100);
@@ -450,7 +451,7 @@ test("traps cannot be planted out of reach of their target", () => {
   const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
   const agent = match.players.get("a");
   agent.room = 0; agent.x = 60; agent.y = 60;
-  sim.applyAction(match, "a", { kind: "plant", targetId: P.doorTrapId(0, "east"), trap: "bomb" });
+  sim.applyAction(match, "a", { kind: "plant", targetId: P.canonicalDoorTrapId(0, "east"), trap: "bomb" });
   assert.equal(agent.busy, null, "the far doorway is out of reach");
   sim.applyAction(match, "a", { kind: "plant", targetId: P.doorTrapId(0, "north"), trap: "bomb" });
   run(match, P.PLANT_MS + 100);
@@ -670,4 +671,82 @@ test("furniture never clips other furniture, and every room is fully furnished",
       }
     }
   }
+});
+
+// --- A doorway is one opening, trapped from both sides -----------------------------------
+
+test("a doorway trap fires on an agent coming through from the far side", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const planter = match.players.get("a");
+  const victim = match.players.get("b");
+
+  // Planted from room 0, on its east door.
+  planter.room = 0; planter.x = P.ROOM_W; planter.y = P.ROOM_H / 2;
+  sim.applyAction(match, "a", {
+    kind: "plant", targetId: P.canonicalDoorTrapId(0, "east"), trap: "bomb",
+  });
+  run(match, P.PLANT_MS + 100);
+  planter.room = 8;
+
+  // Walked into from room 1, through what room 1 calls its west door: the same opening.
+  victim.room = 1; victim.x = 40; victim.y = P.ROOM_H / 2;
+  victim.invulnerableUntil = 0;
+  sim.applyInput(match, "b", 1, -1, 0);
+  run(match, 2500);
+  assert.equal(victim.room, 0, "the victim should have crossed into room 0");
+  assert.equal(victim.hp, 0, "a trapped doorway must fire whichever way it is crossed");
+  assert.equal(planter.takedowns, 1, "the planter gets the takedown from either side");
+});
+
+test("both sides of a doorway name the same trap", () => {
+  for (const [room, direction] of [[0, "east"], [0, "south"], [4, "north"], [7, "west"]]) {
+    const neighbour = P.neighbourRoom(room, direction);
+    assert.notEqual(neighbour, null, `room ${room} should have a ${direction} neighbour`);
+    assert.equal(
+      P.canonicalDoorTrapId(room, direction),
+      P.canonicalDoorTrapId(neighbour, P.oppositeDirection(direction)),
+      `room ${room}'s ${direction} door and room ${neighbour}'s ${P.oppositeDirection(direction)} door are one opening`,
+    );
+  }
+});
+
+test("a doorway trap can be planted and disarmed from either side", () => {
+  const match = start(roster({ id: "a", kit: "director" }, { id: "b", kit: "director" }));
+  const planter = match.players.get("a");
+  const other = match.players.get("b");
+  const doorId = P.canonicalDoorTrapId(0, "east");
+
+  planter.room = 0; planter.x = P.ROOM_W; planter.y = P.ROOM_H / 2;
+  sim.applyAction(match, "a", { kind: "plant", targetId: doorId, trap: "spring" });
+  run(match, P.PLANT_MS + 100);
+  assert.ok(match.traps.has(doorId), "the doorway should hold the trap");
+
+  // The far side addresses the same opening by its own wall, and must still reach it.
+  other.room = 1; other.x = 0; other.y = P.ROOM_H / 2;
+  sim.applyAction(match, "b", {
+    kind: "disarm", targetId: P.canonicalDoorTrapId(1, "west"),
+  });
+  run(match, P.DISARM_MS + 100);
+  assert.ok(!match.traps.has(doorId), "disarming from the far side should clear the doorway");
+});
+
+test("a doorway trap is visible from both rooms, marked on the viewer's own wall", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const planter = match.players.get("a");
+  planter.room = 0; planter.x = P.ROOM_W; planter.y = P.ROOM_H / 2;
+  sim.applyAction(match, "a", {
+    kind: "plant", targetId: P.canonicalDoorTrapId(0, "east"), trap: "bomb",
+  });
+  run(match, P.PLANT_MS + 100);
+
+  const here = view.buildSnapshot(match, "a").traps.find(entry => entry.direction);
+  assert.ok(here, "the planter should see their own doorway trap");
+  assert.equal(here.direction, "east", "marked on the planter's east wall");
+
+  // The same trap, seen from the other room by someone carrying a detector.
+  planter.room = 1; planter.x = 0; planter.y = P.ROOM_H / 2;
+  const across = view.buildSnapshot(match, "a").traps.find(entry => entry.direction);
+  assert.ok(across, "the same opening should be visible from the far side");
+  assert.equal(across.direction, "west", "marked on that room's own west wall");
+  assert.equal(across.targetId, here.targetId, "and it is the same trap, not a second one");
 });

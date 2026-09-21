@@ -12,7 +12,7 @@ import { spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/spri
 import {
   ATTACK_WINDUP_MS, DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FURNITURE_FOOTPRINT, MISSION_ITEMS,
   ROOM_H, ROOM_W,
-  carryableLabel, doorTrapDirection, isDoorTrapId,
+  carryableLabel, isDoorTrapId,
   type Carryable, type DecorType, type Direction, type EffectKind, type FurnitureType,
   type MatchSnapshot, type RoomActor, type RoomDecor, type RoomTrap,
 } from "./shared/protocol.ts";
@@ -50,6 +50,24 @@ export function project(x: number, y: number): [number, number] {
 }
 
 const depthOf = (x: number, y: number) => x + y;
+
+/**
+ * A unit screen vector for the way an agent is facing.
+ *
+ * Facing is stored in world terms, and the room is drawn isometrically, so "right" is not
+ * screen-right: world +x runs down and to the right, world +y down and to the left. Anything
+ * drawn pointing the way an agent faces has to come through here.
+ */
+export function facingScreenDir(facing: RoomActor["facing"]): readonly [number, number] {
+  const [wx, wy] = facing === "right" ? [1, 0]
+    : facing === "left" ? [-1, 0]
+      : facing === "down" ? [0, 1]
+        : [0, -1];
+  const sx = AX * (wx - wy);
+  const sy = BY * (wx + wy);
+  const length = Math.hypot(sx, sy) || 1;
+  return [sx / length, sy / length];
+}
 
 type Sprites = Map<string, GenerationSprites | "loading" | "error">;
 
@@ -94,9 +112,10 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
 
   // Doorway traps sit flat in the threshold, so they draw with the floor rather than sorted.
   for (const trap of snapshot.traps) {
-    if (!isDoorTrapId(trap.targetId)) continue;
-    const direction = doorTrapDirection(trap.targetId);
-    if (!snapshot.doors.includes(direction)) continue;
+    // The direction comes from the snapshot, not from the id: a doorway trap is keyed to the
+    // opening, so its id names the other room's wall when you are standing on the far side.
+    const direction = trap.direction;
+    if (!direction || !snapshot.doors.includes(direction)) continue;
     const anchor = doorAnchorWorld(direction);
     drawTrapMarker(context, anchor.x, anchor.y, 6, trap, timeMs, reducedMotion);
   }
@@ -1065,30 +1084,81 @@ function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: 
   }
 
   if (actor.attackingMs > 0) {
-    // The wind-up, read off the remaining window. A drawn stiletto sweeps an arc through
-    // the swing; a bare fist just flares, so the two are never mistaken at a glance.
+    // Thrust out along the way the agent is facing, and back again, so a blow reads as
+    // aimed rather than as a flash around the body. Spy vs Spy's whole tell was the weapon
+    // sticking out in front of you, and it is what makes a near miss legible.
     const swing = input.reducedMotion
-      ? 0.5
+      ? 0.6
       : 1 - Math.max(0, Math.min(1, actor.attackingMs / ATTACK_WINDUP_MS));
+    const reach = Math.sin(Math.max(0, Math.min(1, swing)) * Math.PI);
+    const [dx, dy] = facingScreenDir(actor.facing);
+    const handX = Math.round(x) + dx * 10;
+    const handY = Math.round(y) - 26 + dy * 10;
+
     context.save();
-    context.strokeStyle = ALERT;
+    context.translate(handX, handY);
+    context.rotate(Math.atan2(dy, dx));
+    context.translate(reach * (actor.hasKnife ? 26 : 16), 0);
+    context.lineJoin = "round";
+    context.strokeStyle = INK;
+
     if (actor.hasKnife) {
-      const from = -Math.PI * 0.85 + swing * Math.PI * 1.15;
-      context.lineWidth = 4;
-      context.strokeStyle = PAPER;
+      // A stiletto: tapered blade, crossguard and grip, so it is unmistakably a blade.
+      context.fillStyle = "#2b3220";
+      context.lineWidth = 1.5;
       context.beginPath();
-      context.arc(Math.round(x), Math.round(y) - 26, 30, from, from + Math.PI * 0.45);
+      context.roundRect(-17, -2.5, 12, 5, 2);
+      context.fill();
       context.stroke();
-      context.strokeStyle = ALERT;
+      context.fillStyle = WALL_DARK;
+      context.beginPath();
+      context.roundRect(-6, -7, 3.5, 14, 1.5);
+      context.fill();
+      context.stroke();
+      context.fillStyle = PAPER;
       context.lineWidth = 2;
       context.beginPath();
-      context.arc(Math.round(x), Math.round(y) - 26, 24, from, from + Math.PI * 0.45);
+      context.moveTo(-2.5, -3.4);
+      context.lineTo(26, 0);
+      context.lineTo(-2.5, 3.4);
+      context.closePath();
+      context.fill();
       context.stroke();
+      // A glint down the edge at full extension.
+      if (reach > 0.55) {
+        context.strokeStyle = SIGNAL;
+        context.lineWidth = 1.5;
+        context.globalAlpha = (reach - 0.55) / 0.45;
+        context.beginPath();
+        context.moveTo(0, -1.2);
+        context.lineTo(21, -0.3);
+        context.stroke();
+      }
     } else {
-      context.lineWidth = 3;
+      // A bare fist on a short forearm.
+      context.strokeStyle = INK;
+      context.lineWidth = 5;
       context.beginPath();
-      context.arc(Math.round(x), Math.round(y) - 26, 20 + swing * 8, 0, Math.PI * 2);
+      context.moveTo(-10, 0);
+      context.lineTo(7, 0);
       context.stroke();
+      context.fillStyle = PAPER;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(11, 0, 6, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      if (reach > 0.6) {
+        context.strokeStyle = ALERT;
+        context.lineWidth = 2;
+        context.globalAlpha = (reach - 0.6) / 0.4;
+        for (const angle of [-0.6, 0, 0.6]) {
+          context.beginPath();
+          context.moveTo(18 + Math.cos(angle) * 2, Math.sin(angle) * 4);
+          context.lineTo(18 + Math.cos(angle) * 9, Math.sin(angle) * 11);
+          context.stroke();
+        }
+      }
     }
     context.restore();
   }
@@ -1443,6 +1513,85 @@ export function drawTitleScreen(
     context.font = "600 13px ui-monospace, monospace";
     context.textAlign = "center";
     context.fillText(entry === "error" ? "ARTWORK OFFLINE" : "LOADING ARTWORK…", 214, top + 88);
+    context.restore();
+  }
+
+  context.restore();
+}
+
+/**
+ * The chosen agent alone, spotlit, at portrait scale.
+ *
+ * Shown once before the title screen so the player sees who they picked while the SDK's own
+ * picker — which lists Friends as text only — is still one click behind them.
+ */
+export function drawAgentPortrait(
+  context: CanvasRenderingContext2D,
+  options: {
+    timeMs: number; reducedMotion: boolean;
+    sprites: GenerationSprites | "loading" | "error" | undefined;
+  },
+): void {
+  const { timeMs, reducedMotion } = options;
+  // The agent stands in the upper two thirds; the caption card below it owns the rest.
+  const floor = 352;
+
+  context.save();
+  context.imageSmoothingEnabled = false;
+
+  const backdrop = context.createLinearGradient(0, 0, 0, VIEW_H);
+  backdrop.addColorStop(0, "#0b0f07");
+  backdrop.addColorStop(0.72, "#222b16");
+  backdrop.addColorStop(1, "#141a0d");
+  context.fillStyle = backdrop;
+  context.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  // A scrim under the caption, so the card reads whatever the artwork behind it is doing.
+  const scrim = context.createLinearGradient(0, floor + 40, 0, VIEW_H);
+  scrim.addColorStop(0, "rgba(8,11,6,0)");
+  scrim.addColorStop(0.45, "rgba(8,11,6,0.82)");
+  scrim.addColorStop(1, "rgba(8,11,6,0.94)");
+
+  // A single overhead spot, so the agent reads as the subject rather than a sprite on a field.
+  const cone = context.createRadialGradient(VIEW_W / 2, floor - 150, 40, VIEW_W / 2, floor - 90, 330);
+  cone.addColorStop(0, "rgba(204,255,0,0.20)");
+  cone.addColorStop(1, "rgba(204,255,0,0)");
+  context.fillStyle = cone;
+  context.fillRect(0, 0, VIEW_W, VIEW_H);
+  context.fillStyle = scrim;
+  context.fillRect(0, floor + 40, VIEW_W, VIEW_H - floor - 40);
+
+  context.fillStyle = "rgba(0,0,0,0.45)";
+  context.beginPath();
+  context.ellipse(VIEW_W / 2, floor + 16, 96, 22, 0, 0, Math.PI * 2);
+  context.fill();
+
+  const entry = options.sprites;
+  const scale = 12;
+  const left = VIEW_W / 2 - (16 * scale) / 2;
+  const top = floor - 16 * scale + 14;
+
+  if (entry && entry !== "loading" && entry !== "error") {
+    const frameIndex = reducedMotion ? 0 : Math.floor(timeMs / 150) % 8;
+    const rows = spriteFrame(entry, "down", !reducedMotion, frameIndex, "right").frame.rows;
+    context.save();
+    context.beginPath();
+    context.rect(left - scale, top - scale, 16 * scale + scale * 2, 16 * scale + scale * 2);
+    context.clip();
+    drawFriendPixels(context, rows, left, top, scale);
+    context.restore();
+  } else {
+    context.save();
+    context.strokeStyle = "rgba(238,241,228,0.5)";
+    context.setLineDash([8, 8]);
+    context.lineWidth = 3;
+    context.strokeRect(left + 30, top + 26, 132, 166);
+    context.setLineDash([]);
+    context.fillStyle = "rgba(238,241,228,0.75)";
+    context.font = "600 15px ui-monospace, monospace";
+    context.textAlign = "center";
+    context.fillText(
+      entry === "error" ? "ARTWORK OFFLINE" : "LOADING ARTWORK…", VIEW_W / 2, top + 116);
     context.restore();
   }
 

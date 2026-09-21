@@ -93,7 +93,9 @@ try {
   await child.getByText(/Relay online/).waitFor({ timeout: 20000 });
   console.log("  RELAY ONLINE through the proxy");
 
-  // Past the attract screen, which is what loads first.
+  // Past the agent confirmation and the attract screen, which load first.
+  await child.getByRole("button", { name: "Deploy this agent", exact: true })
+    .click({ timeout: 25000 });
   await child.getByRole("button", { name: "Enter the embassy", exact: true })
     .click({ timeout: 20000 });
   await child.getByRole("heading", { name: "Agent dossier" }).waitFor({ timeout: 15000 });

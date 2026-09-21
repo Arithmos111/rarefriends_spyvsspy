@@ -61,20 +61,33 @@ try {
   const one = await open({ width: 1180, height: 860, second: false, touch: false });
   const two = await open({ width: 430, height: 880, second: true, touch: true });
 
-  // The attract screen, then the training run, then on into the briefing.
+  // The agent confirmation, the attract screen, the training run, then the briefing.
+  await one.child.getByRole("button", { name: "Deploy this agent", exact: true })
+    .waitFor({ timeout: 25000 });
+  await shot(one.page, "0-confirm-agent");
+  for (const agent of [one, two]) {
+    await agent.child.getByRole("button", { name: "Deploy this agent", exact: true })
+      .click({ timeout: 25000 }).catch(() => {});
+  }
   await one.child.getByRole("button", { name: "Training run", exact: true })
     .waitFor({ timeout: 25000 });
-  await shot(one.page, "0-title");
+  await shot(one.page, "1-title");
 
   await one.child.getByRole("button", { name: "Training run", exact: true }).click();
   await one.child.locator(".er-lesson").waitFor({ timeout: 15000 });
-  await shot(one.page, "1-training");
+  await shot(one.page, "2-training");
+  // Collapsed, so the room underneath is clear to experiment in.
+  await one.child.getByRole("button", { name: /^Got it/ }).click();
+  await one.child.locator(".er-lesson-bar").waitFor({ timeout: 10000 });
+  await shot(one.page, "2b-training-hidden");
+  await one.child.getByRole("button", { name: "Show", exact: true }).click();
+  await one.child.locator(".er-lesson").waitFor({ timeout: 10000 });
   // Step on a few lessons so the shot shows a staged one rather than "walk about".
   for (let index = 0; index < 4; index++) {
-    await one.child.getByRole("button", { name: "Skip step", exact: true }).click();
+    await one.child.getByRole("button", { name: "Next step", exact: true }).click();
     await one.page.waitForTimeout(160);
   }
-  if (await one.child.locator(".er-lesson").count()) await shot(one.page, "2-training-trap");
+  if (await one.child.locator(".er-lesson").count()) await shot(one.page, "3-training-trap");
   await one.child.getByRole("button", { name: "Leave training", exact: true }).click();
 
   const enter = one.child.getByRole("button", { name: "Enter the embassy", exact: true });
@@ -84,7 +97,7 @@ try {
     const gate = agent.child.getByRole("button", { name: "Enter the embassy", exact: true });
     await gate.click({ timeout: 25000 }).catch(() => {});
   }
-  await shot(one.page, "3-briefing");
+  await shot(one.page, "4-briefing");
 
   await one.child.getByRole("button", { name: /^Buy crate/ }).click();
   await one.page.getByRole("button", { name: /^Confirm preview/ }).click();
@@ -92,7 +105,7 @@ try {
   await one.child.getByRole("button", { name: "Open crate", exact: true }).click();
   await one.page.getByRole("button", { name: /^Confirm preview/ }).click();
   await one.child.getByRole("heading", { name: /Kit$/ }).waitFor({ timeout: 15000 });
-  await shot(one.page, "4-crate-reveal");
+  await shot(one.page, "5-crate-reveal");
   await one.child.getByRole("button", { name: /^Equip / }).click();
 
   await one.child.getByRole("button", { name: "Create", exact: true }).click();
@@ -104,7 +117,7 @@ try {
   await two.child.locator(".er-field input").fill(code);
   await two.child.getByRole("button", { name: "Join lobby", exact: true }).click();
   await two.child.locator(".er-roster li").nth(1).waitFor();
-  await shot(one.page, "5-lobby");
+  await shot(one.page, "6-lobby");
 
   await one.child.getByRole("button", { name: "Ready", exact: true }).click();
   await two.child.getByRole("button", { name: "Ready", exact: true }).click();
@@ -112,8 +125,8 @@ try {
   await two.child.locator(".er-canvas").waitFor({ timeout: 20000 });
   // Give the canonical Friend artwork time to arrive before capturing.
   await one.page.waitForTimeout(4000);
-  await shot(one.page, "6-match-desktop");
-  await shot(two.page, "7-match-phone");
+  await shot(one.page, "7-match-desktop");
+  await shot(two.page, "8-match-phone");
 
   // Walk agent one onto its nearest furniture and open the trap menu for a busier frame.
   const canvas = one.child.locator(".er-canvas");
@@ -126,7 +139,7 @@ try {
   } });
   await one.page.waitForTimeout(1800);
   await one.child.getByRole("button", { name: /^Trap/ }).click().catch(() => {});
-  await shot(one.page, "8-trap-menu");
+  await shot(one.page, "9-trap-menu");
   await one.child.getByRole("button", { name: /^Close Set a trap/ }).click().catch(() => {});
 
   // A few searches for a pickup flash. Loot placement is seeded, so this is opportunistic
@@ -136,18 +149,18 @@ try {
     await one.child.getByRole("button", { name: /^Search/ }).click().catch(() => {});
     await one.page.waitForTimeout(900);
   }
-  if (await one.child.locator(".er-flash").count()) await shot(one.page, "9-pickup-flash");
+  if (await one.child.locator(".er-flash").count()) await shot(one.page, "10-pickup-flash");
   else console.log("  (no pickup flash this run)");
 
   // The career standings and the Friend naming screen, both from the briefing room.
   await one.child.getByRole("button", { name: "Leave", exact: true }).click().catch(() => {});
   await one.page.waitForTimeout(800);
   await one.child.getByRole("button", { name: /^Standings/ }).click().catch(() => {});
-  await shot(one.page, "10-standings");
+  await shot(one.page, "11-standings");
   await one.child.getByRole("button", { name: /^Close Career standings/ }).click().catch(() => {});
   await one.child.getByRole("button", { name: /^Name Friend|^Rename/ }).click().catch(() => {});
   await one.child.locator(".er-field input").fill("Nightjar").catch(() => {});
-  await shot(one.page, "11-name-friend");
+  await shot(one.page, "12-name-friend");
 
   relay.stop();
 } finally {

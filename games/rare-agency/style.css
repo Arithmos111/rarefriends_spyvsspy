@@ -477,3 +477,51 @@
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+
+/* --- Agent confirmation ----------------------------------------------------------------- */
+
+.er-confirm {
+  position: relative; flex: 1 1 auto; min-height: 0;
+  display: grid; place-items: center; background: var(--void);
+}
+.er-confirm-card {
+  position: absolute; z-index: 3;
+  left: 50%; transform: translateX(-50%);
+  bottom: max(52px, 11cqh);
+  width: min(600px, 90%);
+  text-align: center; color: var(--paper);
+}
+.er-confirm-kicker {
+  margin: 0; font: 700 11px ui-monospace, monospace;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--signal);
+}
+.er-confirm-card h2 {
+  margin: 0.2em 0 0; font: 800 26px ui-monospace, monospace;
+  display: flex; align-items: center; justify-content: center; gap: 0.5em; flex-wrap: wrap;
+}
+.er-confirm-id { margin: 0.15em 0 0.5em; font: 600 14px ui-monospace, monospace; opacity: 0.8; }
+.er-confirm-card .er-fine { color: var(--paper); opacity: 0.72; }
+.er-confirm-card .er-primary { margin-top: 0.7em; min-width: 12em; }
+.er-confirm-swap { margin-top: 0.7em; text-wrap: balance; }
+
+/* --- Collapsed training objective -------------------------------------------------------- */
+
+.er-lesson-bar {
+  position: absolute; z-index: 6;
+  left: 50%; transform: translateX(-50%);
+  /* Clear of the SDK frame's own menu bar along the bottom edge of the container. */
+  bottom: max(58px, 12cqh);
+  display: flex; align-items: center; gap: 0.6em;
+  max-width: min(560px, 92%);
+  padding: 0.35em 0.5em 0.35em 0.8em;
+  background: rgba(20, 24, 15, 0.94);
+  border: 2px solid var(--signal);
+  border-radius: 999px;
+  color: var(--paper);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.er-lesson-bar strong {
+  font: 700 13px ui-monospace, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.er-lesson-bar button { font-size: 12px; padding: 0.3em 0.7em; }

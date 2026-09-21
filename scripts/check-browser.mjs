@@ -105,6 +105,23 @@ try {
     return seen.size;
   });
 
+  // --- Agent confirmation ------------------------------------------------------------------
+  // The first thing anybody sees is who they are playing, because the SDK's picker is text only.
+  for (const agent of [one, two]) {
+    await agent.child.getByRole("button", { name: "Deploy this agent", exact: true })
+      .waitFor({ timeout: 20000 });
+  }
+  const confirmLabel = await one.child.locator("canvas.er-canvas").first().getAttribute("aria-label");
+  if (!/Your agent:/i.test(confirmLabel ?? "")) {
+    throw new Error(`the confirm screen should name the agent, got: ${confirmLabel}`);
+  }
+  const swap = await one.child.locator(".er-confirm-swap").innerText();
+  assert.match(swap, /Friend #\d+/, "the confirm screen should name the control that switches Friend");
+  for (const agent of [one, two]) {
+    await agent.child.getByRole("button", { name: "Deploy this agent", exact: true }).click();
+  }
+  step("the agent confirmation names the Friend and how to change it");
+
   // --- Title screen ----------------------------------------------------------------------
   // The attract screen is what everybody sees first, and it names the Friend being played.
   await one.child.getByRole("button", { name: "Training run", exact: true })
@@ -138,6 +155,15 @@ try {
     `the training run is not drawing the embassy (${trainingPaint} distinct sampled colours)`);
   step(`training run renders the embassy (${trainingPaint} distinct sampled colours)`);
 
+  // The card collapses so the room underneath can be experimented with, and comes back.
+  await two.child.getByRole("button", { name: /^Got it/ }).click();
+  await two.child.locator(".er-lesson-bar").waitFor({ timeout: 10000 });
+  assert.equal(await two.child.locator(".er-lesson").count(), 0,
+    "hiding the objective should clear the card off the room");
+  await two.child.getByRole("button", { name: "Show", exact: true }).click();
+  await two.child.locator(".er-lesson").waitFor({ timeout: 10000 });
+  step("the training objective can be hidden to experiment, and brought back");
+
   const firstStep = await two.child.locator(".er-lesson-step").innerText();
   // The step counter is uppercased by CSS, so match without regard to case.
   assert.match(firstStep, /step 1 of \d+/i, "the training run should open on its first step");
@@ -148,7 +174,7 @@ try {
     const done = await two.child.locator(".er-lesson-done").count();
     if (done) break;
     titles.push(await two.child.locator(".er-lesson h3").innerText());
-    await two.child.getByRole("button", { name: "Skip step", exact: true }).click();
+    await two.child.getByRole("button", { name: "Next step", exact: true }).click();
     await two.page.waitForTimeout(120);
   }
   await two.child.getByRole("heading", { name: "Training complete" }).waitFor({ timeout: 15000 });

@@ -30,6 +30,15 @@ then create or join a lobby.
 > wallet; a temporary, balance-dependent Friend is not eligible. Open the same URL on a second device or browser to play
 against yourself. The printed LAN URL works from a phone on the same wifi.
 
+## Choosing your agent
+
+The SDK's Friend picker lists Friends as text only, and a game cannot change that: the picker
+is trusted runtime code outside the sandbox, and the game is handed one already-verified
+Friend with no channel back. So the game confirms the choice immediately afterwards — the
+agent is drawn at portrait scale under a spotlight with their codename, Friend number and
+career record — and names the exact control in the SDK frame that switches to another. See
+the known issues for the full shape of that gap.
+
 ## Title screen and training run
 
 The game opens on an attract screen: the embassy at night, your own Friend drawn at portrait
@@ -41,8 +50,12 @@ the browser with no relay and no lobby, so it starts instantly and nothing anoth
 can disturb it, and each step is cleared by actually performing the action rather than by
 watching one: move, cross a doorway, search, take intelligence, trap furniture, trap a doorway,
 strike, strike with the stiletto, escape. A step cannot be cleared until it has been readable
-for a moment, so one you happen to satisfy on the way in is still shown. **Skip step** jumps
-ahead and **Leave training** returns to the briefing, where the run can be started again.
+for a moment, so one you happen to satisfy on the way in is still shown.
+
+**Got it — let me try** collapses the card to a slim bar naming the current step, so the room
+underneath is clear to experiment in; **Show** brings it back. **Next step** moves on and
+**Leave training** returns to the briefing, where the run can be started again. Lessons never
+move your agent: the objective comes to wherever you are standing instead.
 
 ## Controls
 
@@ -57,6 +70,10 @@ ahead and **Leave training** returns to the briefing, where the run can be start
 | **Q** or the trap button | Open the trap menu for the furniture **or doorway** you are standing at |
 | **1 / 2 / 3** | Set a letter bomb, spring trap or water bucket directly |
 | **Esc** | Close a menu |
+
+Strikes point where you are facing. A bare fist thrusts out on a short forearm; the stiletto
+is drawn as a blade — tapered point, crossguard and grip — and stabs out along your facing and
+back, which is what makes a near miss readable rather than a flash around the body.
 
 Every trap has its own detonation, in the world and in the ear: a letter bomb throws a
 shockwave and soot, a spring trap snaps shut in a metal star, a water bucket tips and splashes,
@@ -90,7 +107,11 @@ and a disguise kit — are each hidden in one piece of furniture, in four differ
 rooms, never in the gate room. Searching takes 0.9s, or 0.55s with a lockpick.
 Searched furniture stays searched for everyone.
 
-**Traps.** Set a trap inside any untrapped piece of furniture, **or rig a doorway**. One trap
+**Traps.** A doorway is one opening shared by two rooms, so a trap on it fires on anyone who
+crosses it in either direction, from either side, and can be spotted and disarmed from either
+room.
+
+Set a trap inside any untrapped piece of furniture, **or rig a doorway**. One trap
 per target. A trapped doorway springs on the next agent who walks through it.
 
 **Your own traps are live against you.** Forget where you left a letter bomb and it will take

@@ -28,13 +28,15 @@ Open the printed URL (normally `http://localhost:4173`), connect your wallet and
 
 ## Play
 
+The SDK's Friend picker lists Friends as text only and cannot be changed from a game, so the entry confirms the choice straight afterwards: the chosen agent is drawn at portrait scale with their codename, Friend number and career record, and the exact control that switches Friend is named. Strikes point where you are facing, with the stiletto drawn as a blade that stabs out and back.
+
 Everything opens on a title screen showing your own Friend at portrait scale, your career record and a **Training run** — a nine-step walkthrough of every control, played against the real simulation with no relay and no lobby, so it starts instantly. It teaches moving, doorways, searching, taking intelligence, trapping furniture, trapping a doorway, striking, the stiletto, and escaping, in that order. It is reachable again from the briefing at any time.
 
 Move with WASD, arrow keys, the on-screen stick, or by tapping a destination. **E** searches furniture, picks up dropped items and escapes through the gate, whichever is in reach. **F** strikes a nearby agent. **Q** opens the trap menu for the furniture you are standing at; **1**, **2** and **3** set a trap directly. Tapping furniture within reach searches it.
 
 Nine rooms in a 3×3 block. You see only the room you are standing in, so rivals are invisible until you walk in on them. Four items — secret documents, a forged passport, bearer bonds and a disguise kit — are each hidden in one piece of furniture in four different rooms. Searching takes 0.9s, or 0.55s with a lockpick.
 
-Set a trap inside any untrapped furniture, or rig a doorway. Letter bombs and spring traps take the victim out; a water bucket freezes them for 3 seconds. **Your own traps are live against you**, and catching yourself is nobody's takedown. A disarm tool recovers any trap, including your own.
+Set a trap inside any untrapped furniture, or rig a doorway — a doorway is one opening shared by two rooms, so a trap on it fires on anyone crossing it in either direction, from either side. Letter bombs and spring traps take the victim out; a water bucket freezes them for 3 seconds. **Your own traps are live against you**, and catching yourself is nobody's takedown. A disarm tool recovers any trap, including your own.
 
 Agents have **5 health**. A strike takes 1, or 2 with the stiletto. Hidden alongside the intelligence are medkits (restore 3), ballistic vests (raise the maximum by 1) and **exactly one stiletto knife per match**, a random drop that doubles damage, badges its carrier so the room can see them, and falls where they fall. Being taken out drops everything you carry, knife included, and you return after 4 seconds.
 

@@ -14,7 +14,8 @@ import {
   PLAYER_RADIUS, PLAYER_SPEED, RESPAWN_MS, ROOM_H, ROOM_W, SCORE_ESCAPE, SCORE_PER_ITEM,
   SCORE_PER_TAKEDOWN, SCORE_SURVIVED, SCORE_TIME_WIN, SEARCH_MS, SEARCH_MS_LOCKPICK,
   SPAWN_INVULNERABLE_MS, TRAP_IS_LETHAL, TRAP_LABELS, TRAP_TYPES, VEST_BONUS_HP,
-  carryableLabel, doorTrapDirection, doorTrapId, isDoorTrapId, isPowerUp, neighbourRoom,
+  canonicalDoorTrapId, carryableLabel, doorTrapDirection, isDoorTrapId, isPowerUp,
+  neighbourRoom,
   type Carryable, type Direction, type EffectKind, type MatchCue, type MatchEvent,
   type MissionItem,
   type PlayerAction, type PowerUp, type TrapType,
@@ -229,7 +230,7 @@ export function stepMatch(sim: MatchSim, deltaMs: number): void {
       cancelBusy(player);
       const crossing = takeLastCrossing();
       if (crossing) {
-        const trap = sim.traps.get(doorTrapId(crossing.from, crossing.direction));
+        const trap = sim.traps.get(canonicalDoorTrapId(crossing.from, crossing.direction));
         if (trap) {
           sim.traps.delete(trap.targetId);
           triggerTrap(sim, player, trap);
@@ -295,19 +296,40 @@ export function doorAnchor(direction: Direction): { x: number; y: number } {
 }
 
 /** True when the agent is standing close enough to a trap target, furniture or doorway. */
+/**
+ * The doorway of this player's room that a target id refers to, from either side, or null.
+ *
+ * A doorway trap is keyed to the opening rather than to one room's description of it, so a
+ * player standing on the far side names it by their own wall. Both resolve here.
+ */
+function doorwayOf(sim: MatchSim, player: SimPlayer, targetId: number): Direction | null {
+  if (!isDoorTrapId(targetId)) return null;
+  for (const direction of sim.map.rooms[player.room].doors) {
+    if (canonicalDoorTrapId(player.room, direction) === targetId) return direction;
+  }
+  return null;
+}
+
 function targetInReach(sim: MatchSim, player: SimPlayer, targetId: number): boolean {
-  if (Math.floor(targetId / 100) !== player.room) return false;
   if (isDoorTrapId(targetId)) {
-    const direction = doorTrapDirection(targetId);
-    if (!sim.map.rooms[player.room].doors.includes(direction)) return false;
+    const direction = doorwayOf(sim, player, targetId);
+    if (!direction) return false;
     const anchor = doorAnchor(direction);
     return distance(player.x, player.y, anchor.x, anchor.y) <= INTERACT_RANGE;
   }
+  if (Math.floor(targetId / 100) !== player.room) return false;
   return furnitureInReach(sim, player, targetId) !== null;
 }
 
 function targetLabel(targetId: number): string {
   return isDoorTrapId(targetId) ? `${doorTrapDirection(targetId)} doorway` : "furniture";
+}
+
+/** Normalise a client-supplied door target to the doorway's own id. */
+function canonicalTarget(sim: MatchSim, player: SimPlayer, targetId: number): number {
+  if (!isDoorTrapId(targetId)) return targetId;
+  const direction = doorwayOf(sim, player, targetId);
+  return direction ? canonicalDoorTrapId(player.room, direction) : targetId;
 }
 
 function beginSearch(sim: MatchSim, player: SimPlayer, furnitureId: number): void {
@@ -319,6 +341,7 @@ function beginSearch(sim: MatchSim, player: SimPlayer, furnitureId: number): voi
 }
 
 function beginPlant(sim: MatchSim, player: SimPlayer, targetId: number, trap: TrapType): void {
+  targetId = canonicalTarget(sim, player, targetId);
   if (player.busy || !TRAP_TYPES.includes(trap)) return;
   if ((player.traps[trap] ?? 0) <= 0) return;
   if (!targetInReach(sim, player, targetId) || sim.traps.has(targetId)) return;
@@ -327,6 +350,7 @@ function beginPlant(sim: MatchSim, player: SimPlayer, targetId: number, trap: Tr
 
 /** Your own traps can be disarmed too, since they are now just as dangerous to you. */
 function beginDisarm(sim: MatchSim, player: SimPlayer, targetId: number): void {
+  targetId = canonicalTarget(sim, player, targetId);
   if (player.busy || !player.disarm) return;
   if (!targetInReach(sim, player, targetId)) return;
   if (!sim.traps.has(targetId)) return;

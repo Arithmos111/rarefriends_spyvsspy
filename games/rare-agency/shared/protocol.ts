@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -172,6 +172,26 @@ export function doorTrapDirection(id: number): Direction {
   return DIRECTIONS[(id % 100) - DOOR_TRAP_BASE];
 }
 
+/**
+ * The id of the doorway between two rooms, as seen from either side.
+ *
+ * A doorway is one physical opening with two descriptions: room A's north door is room B's
+ * south door. Keying a trap by whichever side planted it meant walking through from the far
+ * side looked up a different id and missed the trap entirely. Both sides now resolve to the
+ * same id, chosen as the lower-numbered room's description of the opening, so a trapped
+ * doorway is trapped for everyone going either way.
+ */
+export function canonicalDoorTrapId(roomIndex: number, direction: Direction): number {
+  const neighbour = neighbourRoom(roomIndex, direction);
+  if (neighbour === null || neighbour > roomIndex) return doorTrapId(roomIndex, direction);
+  return doorTrapId(neighbour, oppositeDirection(direction));
+}
+
+export function oppositeDirection(direction: Direction): Direction {
+  return direction === "north" ? "south" : direction === "south" ? "north"
+    : direction === "west" ? "east" : "west";
+}
+
 export type PlayerAction =
   | { kind: "search"; furnitureId: number }
   /** targetId is a furniture id or a doorway id; see doorTrapId. */
@@ -261,7 +281,11 @@ export type RoomFurniture = Readonly<{
 export type RoomDrop = Readonly<{ id: number; item: Carryable; x: number; y: number }>;
 
 /** A trap the viewer is allowed to see, on furniture or on a doorway. */
-export type RoomTrap = Readonly<{ targetId: number; type: TrapType; mine: boolean }>;
+export type RoomTrap = Readonly<{
+  targetId: number; type: TrapType; mine: boolean;
+  /** For a doorway trap, which of the viewer's own walls it sits in. Null for furniture. */
+  direction: Direction | null;
+}>;
 
 /**
  * A short-lived world effect drawn at a point in the viewer's room: a trap going off, or a

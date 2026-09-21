@@ -6,7 +6,10 @@
  * the real game does not do, and the fog-of-war rules (you see your own room, your own traps,
  * and other traps only with a detector) are enforced in exactly one place.
  */
-import type { MatchSnapshot, PublicPlayer, RoomTrap } from "./protocol.ts";
+import {
+  canonicalDoorTrapId, isDoorTrapId,
+  type MatchSnapshot, type PublicPlayer, type RoomTrap,
+} from "./protocol.ts";
 import { scoreOf, type MatchSim, type SimPlayer } from "./sim.ts";
 
 export function scoreboardOf(sim: MatchSim): PublicPlayer[] {
@@ -42,13 +45,23 @@ export function buildSnapshot(sim: MatchSim, playerId: string): MatchSnapshot {
   const self = sim.players.get(playerId)!;
   const room = sim.map.rooms[self.room];
 
-  // Only traps this viewer set, or can see with a detector. Includes doorway traps.
+  // Only traps this viewer set, or can see with a detector.
   const traps: RoomTrap[] = [];
   for (const trap of sim.traps.values()) {
+    if (isDoorTrapId(trap.targetId)) continue;
     if (Math.floor(trap.targetId / 100) !== self.room) continue;
     const mine = trap.ownerId === playerId;
     if (!mine && !self.detector) continue;
-    traps.push({ targetId: trap.targetId, type: trap.type, mine });
+    traps.push({ targetId: trap.targetId, type: trap.type, mine, direction: null });
+  }
+  // Doorway traps are keyed to the opening, which belongs to two rooms. Walk this room's own
+  // doors so a trap is seen, and marked on the right wall, from whichever side you stand.
+  for (const direction of room.doors) {
+    const trap = sim.traps.get(canonicalDoorTrapId(self.room, direction));
+    if (!trap) continue;
+    const mine = trap.ownerId === playerId;
+    if (!mine && !self.detector) continue;
+    traps.push({ targetId: trap.targetId, type: trap.type, mine, direction });
   }
 
   return {

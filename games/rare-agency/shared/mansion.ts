@@ -8,7 +8,7 @@
  */
 import {
   DECOR_TYPES, FURNITURE_FOOTPRINT, FURNITURE_TYPES, GRID_W, MISSION_ITEMS, PLAYER_RADIUS,
-  ROOM_COUNT, ROOM_FURNITURE, ROOM_H, ROOM_NAMES, ROOM_W, roomDoors,
+  ROOM_COUNT, ROOM_FURNITURE, ROOM_H, ROOM_NAMES, ROOM_W, oppositeDirection, roomDoors,
   type Carryable, type DecorType, type Direction, type FurnitureType, type RoomDecor,
 } from "./protocol.ts";
 
@@ -233,10 +233,8 @@ export function doorEntryPoint(direction: Direction): { x: number; y: number } {
   return { x: inset, y: ROOM_H / 2 };
 }
 
-export function oppositeDirection(direction: Direction): Direction {
-  return direction === "north" ? "south" : direction === "south" ? "north"
-    : direction === "west" ? "east" : "west";
-}
+/** Re-exported so callers working with the map need not reach into the protocol module. */
+export { oppositeDirection };
 
 export function spawnPointFor(seatIndex: number): { room: number; x: number; y: number } {
   const room = SPAWN_ROOMS[seatIndex % SPAWN_ROOMS.length];
