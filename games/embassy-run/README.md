@@ -21,7 +21,13 @@ npm run dev
 
 Open the printed URL. Connect a wallet holding a hardwired Rare Friends Generations
 NFT (generation 1 or higher) on Robinhood mainnet (chain 4663), choose your Friend,
-then create or join a lobby. Open the same URL on a second device or browser to play
+then create or join a lobby.
+
+> **Be on Robinhood mainnet, chain 4663, before you connect.** The SDK only looks up your
+> Friends once the wallet reports that chain. On any other network it skips discovery
+> entirely but still shows "No playable Friends found", which is easy to read as "you own
+> none". A Friend also has to be **hardwired**, meaning it has a permanent token-bound
+> wallet; a temporary, balance-dependent Friend is not eligible. Open the same URL on a second device or browser to play
 against yourself. The printed LAN URL works from a phone on the same wifi.
 
 ## Controls
@@ -183,6 +189,13 @@ widths.
 - **A portrait phone is cramped.** The SDK container is a fixed 3:2 box, so upright
   phones get a small stage. The game stays playable and shows a prompt to rotate.
 - **Reconnecting mid-match rejoins as a new agent** rather than resuming the old one.
+- **A wrong-network wallet looks identical to owning no Friends.** The SDK runtime shows
+  "Switch your wallet to Robinhood mainnet (4663)" and "No playable Friends found" at the
+  same time, because discovery only runs once the wallet reports chain 4663 and otherwise
+  never queries at all. The definitive-sounding second message is the one people read. This
+  cost real time during our first live deployment. The gate is trusted runtime code, so a
+  game cannot correct it; suppressing the empty-list message whenever the wallet is on the
+  wrong chain would fix it in the SDK.
 
 ## Assets
 

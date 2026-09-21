@@ -22,6 +22,8 @@ npm run dev
 
 Open the printed URL (normally `http://localhost:4173`), connect your wallet and select your Friend. The SDK verifies ownership before play. No RF funding or transaction signature is needed for this simulated preview.
 
+**Switch your wallet to Robinhood mainnet (chain 4663) before connecting, and use a hardwired Friend.** On any other chain the SDK skips discovery but still reports "No playable Friends found", which reads as though you own nothing. See the SDK feedback below.
+
 **This game is multiplayer, so it needs a second player.** `npm run dev` also prints a LAN URL: open it on a phone on the same wifi, or open the same URL in a second browser window, and play against yourself. No hosted demo is provided yet; a `Dockerfile` and `fly.toml` are included for one-command deployment.
 
 ## Play
@@ -63,6 +65,8 @@ This repository additionally runs `npm run check`: typecheck, 23 simulation test
 Browser tests use the SDK's own internal identity fixture for mocked wallets and RPC; **a real-wallet playthrough is still outstanding.** The Dockerfile could not be built in the development environment because its network policy blocks Docker Hub's blob CDN; its runtime file set and healthcheck were verified directly instead.
 
 All embassy artwork — floors, walls, furniture, doorways, the gate, traps and items — is drawn procedurally on a canvas. **There are no third-party image, font or audio assets.** Sounds come from the SDK's sound kit. Rare Friend sprites are the canonical on-chain artwork read through the SDK's public sprite reader at 5× integer scale in an 80 × 80 box with the canonical white one-pixel halo over the black mask, never rotated, stretched, smoothed, recoloured or regenerated; Colossus Friends use the SDK's explicit horizontal fallback.
+
+**SDK feedback from a live deployment.** A wallet on the wrong chain is indistinguishable from owning no Friends. `GameHost` only runs `readOwnedFriends` once the wallet session reports chain 4663; on any other chain it never queries, yet the picker still renders "No playable Friends found" directly beneath the "Switch your wallet to Robinhood mainnet (4663)" alert. The definitive-sounding message is the one people act on, and this cost real debugging time while deploying this entry with six eligible Friends in the connected wallet. Suppressing the empty-list message while `wallet.status === "wrong-network"` would resolve it. A game cannot work around this, since the picker and the ownership gate are trusted runtime code that runs before the game component mounts. Relatedly, "hardwired" is load-bearing but easy to miss: a temporary, balance-dependent Friend with no permanent token-bound wallet is not eligible, and the picker does not distinguish it from a wrong-network result either.
 
 **Needs future SDK support.** Realtime multiplayer required a same-origin WebSocket, because the sandbox CSP allows `connect-src 'self'` and the Rare Friends RPC only; the relay therefore attaches to the SDK's own static server and leaves its CSP untouched, but this means the game cannot be hosted as pure static files. The relay cannot verify that a client controls the Friend ID it claims, since the sandbox exposes no signing; closing that needs a signed session attestation from the trusted runtime. Awarding RF for winning a match would need a contract that settles a skill-decided outcome, which the v0.1 chance-game contract does not model. Preview state is session-local, so kits do not persist between sessions.
 

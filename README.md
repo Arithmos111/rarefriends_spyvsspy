@@ -22,6 +22,11 @@ filled with the submitted commit.
 Needs **Node.js 22+**, npm and git, plus a browser wallet holding a hardwired Rare
 Friends Generations NFT (generation 1 or higher) on Robinhood mainnet, chain 4663.
 
+> **Switch your wallet to Robinhood mainnet (chain 4663) before connecting.** On any other
+> network the SDK never queries your holdings, yet still reports "No playable Friends found",
+> which reads like you own nothing. If you hold Friends and the game says you do not, check
+> the network first. See [known issues](games/embassy-run/README.md#known-issues-and-capability-gaps).
+
 ```sh
 npm run setup
 npm run dev

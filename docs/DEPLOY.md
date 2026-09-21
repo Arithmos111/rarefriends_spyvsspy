@@ -203,6 +203,7 @@ against Let's Encrypt's rate limits.
 | Caddy will not start, port already allocated | Traefik from Hostinger's Docker template, or a preinstalled Apache or nginx. See step 4. |
 | Repeated certificate failures, then refusals | Let's Encrypt rate-limits failed validations at five per hostname per hour. Stop Caddy, fix DNS, then start again rather than letting it retry into the limit. |
 | `^[[200~` appears in your commands | The web console's bracketed paste. See step 5. |
+| The game says "No playable Friends found" but you own Friends | Almost always the wallet is on the wrong chain. It must be Robinhood mainnet, **4663**. The SDK skips discovery entirely on any other chain but still prints the empty-list message, so it reads like you own nothing. The Friend must also be **hardwired**, with a permanent token-bound wallet. |
 | Page loads, but the header reads "Relay offline" | The WebSocket is not reaching the relay. Confirm both containers are up, and that nothing but Caddy sits in front of the domain. |
 | Wallet will not connect | The site is being served over plain HTTP, or by IP address. Wallets require HTTPS on a real hostname. |
 | Build is killed partway | Out of memory on a small plan. Add swap: `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`. |
