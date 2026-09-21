@@ -687,22 +687,34 @@ function drawFurniture(
         leg(context, x + lx, y - h * 0.26, height - seat, shade.right);
       }
       isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
-      // Two rails on end posts, not a solid panel: a slab this tall reads as a partition.
-      for (const px of [-w * 0.44, w * 0.44]) {
-        isoBox(context, x + px, y - h * 0.4, 6, 6, height + 24, shade.top, "#7c866a", shade.right);
+      // Slats across the seat, so the top is not a blank plank.
+      context.save();
+      context.strokeStyle = "rgba(20,24,15,0.4)";
+      context.lineWidth = 1.5;
+      for (const across of [-0.2, 0.2]) {
+        const [ax, ay] = project(x + w * across, y - h / 2);
+        const [bx, by] = project(x + w * across, y + h / 2);
+        context.beginPath();
+        context.moveTo(ax, ay - height);
+        context.lineTo(bx, by - height);
+        context.stroke();
       }
-      for (const lift of [14, 24]) {
-        isoBox(context, x, y - h * 0.4, w * 0.88, 5, height + lift,
-          shade.top, shade.left, shade.right);
+      context.restore();
+      // A single back rail on two posts. Two rails close together merged into a panel and
+      // read as a room divider rather than something you sit on.
+      for (const px of [-w * 0.42, w * 0.42]) {
+        isoBox(context, x + px, y - h * 0.38, 5, 5, height + 20, shade.top, "#7c866a", shade.right);
       }
+      isoBox(context, x, y - h * 0.38, w * 0.84, 3, height + 18,
+        shade.top, shade.left, shade.right);
       break;
     }
     case "barrel": {
       // Curved staves and two iron hoops: the one round silhouette in the mansion.
       context.save();
-      const rx = w * 0.5;
-      const ry = w * 0.5 * (BY / AX);
-      const bulge = 5;
+      const rx = w * 0.46;
+      const ry = w * 0.46 * (BY / AX);
+      const bulge = 9;
       context.beginPath();
       context.moveTo(sx - rx, sy - ry);
       context.quadraticCurveTo(sx - rx - bulge, sy - height * 0.5, sx - rx, sy - height + ry * 0.2);
@@ -719,11 +731,23 @@ function drawFurniture(
       context.ellipse(sx, sy - height, rx, ry, 0, 0, Math.PI * 2);
       context.fill();
       context.stroke();
-      context.lineWidth = 3;
-      for (const level of [0.32, 0.68]) {
+      // Staves down the face, then the hoops over them.
+      context.lineWidth = 1;
+      context.strokeStyle = "rgba(20,24,15,0.35)";
+      for (const across of [-0.55, -0.2, 0.2, 0.55]) {
         context.beginPath();
-        context.moveTo(sx - rx - bulge * 0.7, sy - height * level);
-        context.quadraticCurveTo(sx, sy - height * level + ry * 0.9, sx + rx + bulge * 0.7, sy - height * level);
+        context.moveTo(sx + rx * across, sy - ry * 0.4);
+        context.quadraticCurveTo(
+          sx + (rx + bulge) * across, sy - height * 0.5,
+          sx + rx * across, sy - height + ry * 0.4);
+        context.stroke();
+      }
+      context.strokeStyle = INK;
+      context.lineWidth = 3.5;
+      for (const level of [0.3, 0.72]) {
+        context.beginPath();
+        context.moveTo(sx - rx - bulge * 0.72, sy - height * level);
+        context.quadraticCurveTo(sx, sy - height * level + ry * 1.1, sx + rx + bulge * 0.72, sy - height * level);
         context.stroke();
       }
       context.restore();
