@@ -559,14 +559,14 @@ test("a landed blow spawns a slash for the knife and an impact for a fist", () =
 
   match.effects.length = 0;
   sim.applyAction(match, "a", { kind: "attack" });
-  assert.equal(match.effects.at(-1)?.kind, "impact", "a bare fist lands as an impact");
+  assert.ok(match.effects.some(e => e.kind === "impact"), "a bare fist lands as an impact");
 
   attacker.knife = true;
   attacker.attackReadyAt = 0;
   target.stunnedUntil = 0;
   match.effects.length = 0;
   sim.applyAction(match, "a", { kind: "attack" });
-  assert.equal(match.effects.at(-1)?.kind, "slash", "the stiletto lands as a slash");
+  assert.ok(match.effects.some(e => e.kind === "slash"), "the stiletto lands as a slash");
 });
 
 test("a missed swing spawns no effect", () => {
@@ -586,8 +586,10 @@ test("effects are pruned once their animation has run out", () => {
   attacker.room = 0; attacker.x = 200; attacker.y = 200; attacker.invulnerableUntil = 0;
   target.room = 0; target.x = 220; target.y = 200; target.invulnerableUntil = 0;
   sim.applyAction(match, "a", { kind: "attack" });
-  assert.equal(match.effects.length, 1);
-  run(match, P.EFFECT_DURATION_MS.impact + 100);
+  // A blow leaves the strike itself and a floating damage number.
+  assert.ok(match.effects.length >= 1);
+  const longest = Math.max(...match.effects.map(e => P.EFFECT_DURATION_MS[e.kind]));
+  run(match, longest + 100);
   assert.equal(match.effects.length, 0, "presentation state must not accumulate over a match");
 });
 
@@ -833,29 +835,123 @@ test("hangings never block movement themselves", () => {
   }
 });
 
-test("every hanging has somewhere walkable to stand and search it from", () => {
-  // The real question is not whether the ideal spot is free, but whether any free spot is in
-  // reach — a bookcase can legitimately stand under a portrait.
-  for (const seed of [1, 7, 20260920, 99991]) {
+/**
+ * Can an agent actually walk from the middle of the room to within reach of this piece?
+ *
+ * Checking only that some nearby point is unoccupied is not enough: furniture can enclose a
+ * free pocket that nothing can walk into. This floods the floor on a coarse grid from the
+ * room's centre and asks whether any reachable cell is in range.
+ */
+function walkableToReach(room, piece) {
+  const STEP = 8;
+  const key = (cx, cy) => `${cx},${cy}`;
+  const startCell = [Math.round(P.ROOM_W / 2 / STEP), Math.round(P.ROOM_H / 2 / STEP)];
+  const seen = new Set([key(...startCell)]);
+  const queue = [startCell];
+  while (queue.length) {
+    const [cx, cy] = queue.shift();
+    const x = cx * STEP;
+    const y = cy * STEP;
+    if (Math.hypot(piece.x - x, piece.y - y) <= P.INTERACT_RANGE) return true;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (seen.has(key(nx, ny))) continue;
+      const px = nx * STEP;
+      const py = ny * STEP;
+      if (!map.insideRoom(px, py)) continue;
+      if (map.blockedByFurniture(room, px, py)) continue;
+      seen.add(key(nx, ny));
+      queue.push([nx, ny]);
+    }
+  }
+  return false;
+}
+
+test("every piece of furniture can be walked to and searched", () => {
+  // The earlier version of this only asked whether a free spot existed near the piece, which
+  // a pocket enclosed by other furniture satisfies. Walking there is the real requirement.
+  for (const seed of [1, 7, 42, 20260920, 99991]) {
     for (const room of map.createMap(seed).rooms) {
       for (const piece of room.furniture) {
-        if (!P.isWallMounted(piece.type)) continue;
-        let reachable = false;
-        for (let step = 0; step < 64 && !reachable; step++) {
-          const angle = (step / 64) * Math.PI * 2;
-          for (const distance of [24, 40, 56, 70]) {
-            const x = piece.x + Math.cos(angle) * distance;
-            const y = piece.y + Math.sin(angle) * distance;
-            if (!map.insideRoom(x, y)) continue;
-            if (map.blockedByFurniture(room, x, y)) continue;
-            if (Math.hypot(piece.x - x, piece.y - y) > P.INTERACT_RANGE) continue;
-            reachable = true;
-            break;
-          }
-        }
-        assert.ok(reachable,
-          `seed ${seed}: the ${piece.type} in ${P.ROOM_NAMES[room.index]} cannot be reached`);
+        assert.ok(walkableToReach(room, piece),
+          `seed ${seed}: the ${piece.type} in ${P.ROOM_NAMES[room.index]} cannot be walked to`);
       }
     }
   }
+});
+
+test("every room has a cache, in the same place, and intelligence only ever hides there", () => {
+  for (const seed of [1, 7, 42, 20260920, 99991]) {
+    const embassy = map.createMap(seed);
+    map.placeMissionItems(embassy, seed);
+    for (const room of embassy.rooms) {
+      const cache = room.furniture.filter(piece => piece.slot === map.CACHE_SLOT);
+      assert.equal(cache.length, 1,
+        `seed ${seed}: ${P.ROOM_NAMES[room.index]} should have exactly one cache`);
+      for (const piece of room.furniture) {
+        if (!piece.contents || !P.MISSION_ITEMS.includes(piece.contents)) continue;
+        assert.equal(piece.slot, map.CACHE_SLOT,
+          `seed ${seed}: ${piece.contents} hid outside the cache in ${P.ROOM_NAMES[room.index]}`);
+      }
+    }
+    // And the cache is in the same world position in every room, so it is learnable.
+    const spots = new Set(embassy.rooms
+      .map(room => room.furniture.find(piece => piece.slot === map.CACHE_SLOT))
+      .map(piece => `${piece.x},${piece.y}`));
+    assert.equal(spots.size, 1, `seed ${seed}: caches should share one position, saw ${[...spots]}`);
+  }
+});
+
+// --- Career points and combat feedback ---------------------------------------------------
+
+test("career points are one for playing and two more for winning", () => {
+  assert.equal(P.careerPointsFor(false), P.CAREER_POINTS_PLAYED);
+  assert.equal(P.careerPointsFor(true), P.CAREER_POINTS_PLAYED + P.CAREER_POINTS_WIN);
+  assert.equal(P.careerPointsFor(false), 1, "turning up is worth one");
+  assert.equal(P.careerPointsFor(true), 3, "a win is worth three all told");
+});
+
+test("a landed blow tells both agents, and floats the damage where it hit", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const attacker = match.players.get("a");
+  const target = match.players.get("b");
+  attacker.room = 0; attacker.x = 200; attacker.y = 200; attacker.invulnerableUntil = 0;
+  target.room = 0; target.x = 220; target.y = 200; target.invulnerableUntil = 0;
+
+  match.cues.length = 0;
+  match.effects.length = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+
+  assert.ok(match.cues.some(c => c.kind === "hurt" && c.to === "b" && c.amount === 1),
+    "the victim is told what it cost them");
+  assert.ok(match.cues.some(c => c.kind === "hit" && c.to === "a" && c.amount === 1),
+    "the attacker is told they connected");
+  const number = match.effects.find(e => e.kind === "damage1");
+  assert.ok(number, "a damage number should float where the blow landed");
+  assert.equal(number.x, target.x);
+
+  // The knife reads as the heavier hit on both sides.
+  attacker.knife = true;
+  attacker.attackReadyAt = 0;
+  target.stunnedUntil = 0;
+  target.hp = P.PLAYER_MAX_HP;
+  match.cues.length = 0;
+  match.effects.length = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.ok(match.cues.some(c => c.kind === "hurt" && c.amount === 2));
+  assert.ok(match.cues.some(c => c.kind === "hit" && c.amount === 2));
+  assert.ok(match.effects.some(e => e.kind === "damage2"));
+});
+
+test("a missed swing tells nobody anything", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  match.players.get("b").room = 5;
+  const attacker = match.players.get("a");
+  attacker.room = 0; attacker.x = 200; attacker.y = 200;
+  match.cues.length = 0;
+  match.effects.length = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.equal(match.cues.length, 0, "swinging at nobody is not feedback");
+  assert.equal(match.effects.length, 0);
 });

@@ -82,7 +82,7 @@ export function buildSnapshot(sim: MatchSim, playerId: string): MatchSnapshot {
         && player.respawnAt === 0)
       .map(player => actorOf(sim, player)),
     furniture: room.furniture.map(piece => ({
-      id: piece.id, type: piece.type, x: piece.x, y: piece.y,
+      id: piece.id, type: piece.type, x: piece.x, y: piece.y, slot: piece.slot,
       searched: piece.searched, emptied: piece.emptied,
     })),
     traps,

@@ -114,6 +114,16 @@ export function createLeaderboard({ log = () => {} } = {}) {
 
     size() { return rows.size; },
 
+    /** One Friend's standing: their points, their place, and how many Friends are ranked. */
+    standing(friendId) {
+      const ranked = [...rows.values()]
+        .filter(row => row.matches > 0)
+        .sort((a, b) => b.points - a.points || b.wins - a.wins || a.deaths - b.deaths);
+      const index = ranked.findIndex(row => row.friendId === String(friendId));
+      if (index < 0) return null;
+      return { points: ranked[index].points, place: index + 1, of: ranked.length };
+    },
+
     async stop() {
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       await saving;

@@ -484,7 +484,10 @@ function attack(sim: MatchSim, player: SimPlayer): void {
   best.busy = null;
   best.stunnedUntil = sim.now + HIT_STUN_MS;
   cue(sim, best.playerId, { kind: "hurt", amount: damage });
+  cue(sim, player.playerId, { kind: "hit", amount: damage });
   effect(sim, player.knife ? "slash" : "impact", best.room, best.x, best.y);
+  // The number floats where the blow landed, so everyone in the room sees the trade.
+  effect(sim, damage >= 2 ? "damage2" : "damage1", best.room, best.x, best.y);
   if (best.hp <= 0) {
     player.takedowns++;
     cue(sim, player.playerId, { kind: "takedown" });

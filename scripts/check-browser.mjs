@@ -313,9 +313,15 @@ try {
   const held = await one.child.locator(".er-track-held").count();
   step(`mission track shows 4 slots, ${held} currently held`);
 
-  // Health is a bar out of five, not a pair of pips.
+  // Health is a bar out of a maximum, not a pair of pips. The maximum is five unless this
+  // agent has already turned up a ballistic vest, which legitimately raises it.
   const health = await one.child.locator(".er-health small").innerText();
-  assert.match(health, /^\d+\/5$/, `health should read out of five, got "${health}"`);
+  const reading = /^(\d+)\/(\d+)$/.exec(health);
+  assert.ok(reading, `health should read current out of maximum, got "${health}"`);
+  assert.ok(Number(reading[2]) >= 5,
+    `the maximum should be at least five, got "${health}"`);
+  assert.ok(Number(reading[1]) <= Number(reading[2]),
+    `health cannot exceed its maximum, got "${health}"`);
   step(`health reads ${health}`);
 
   // Naming a Friend puts the name in parentheses after the codename.

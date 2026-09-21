@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 11;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -284,6 +284,18 @@ export function displayName(codename: string, friendName: string | null): string
 }
 
 /** Points awarded once per match, totalled into the career leaderboard. */
+/**
+ * Career points, which are deliberately not the match score.
+ *
+ * The match score rewards playing well within one match. Career standings reward turning up
+ * and winning, so a long game and a short one are worth the same and nobody can farm the
+ * board by grinding items in a match they were never going to win.
+ */
+export const CAREER_POINTS_PLAYED = 1;
+export const CAREER_POINTS_WIN = 2;
+export const careerPointsFor = (won: boolean): number =>
+  CAREER_POINTS_PLAYED + (won ? CAREER_POINTS_WIN : 0);
+
 export const SCORE_ESCAPE = 100;
 export const SCORE_PER_ITEM = 10;
 export const SCORE_PER_TAKEDOWN = 5;
@@ -303,6 +315,8 @@ export type BusyState = Readonly<{ kind: "search" | "plant" | "disarm"; targetId
 
 export type RoomFurniture = Readonly<{
   id: number; type: FurnitureType; x: number; y: number;
+  /** Which anchor it stands on. The client uses it to find the cache and mark the floor. */
+  slot: number;
   searched: boolean; emptied: boolean;
 }>;
 
@@ -320,10 +334,12 @@ export type RoomTrap = Readonly<{
  * blow landing. Everyone standing in the room sees it, so a detonation reads as an event in
  * the world rather than as private feedback to whoever it happened to.
  */
-export const EFFECT_KINDS = ["bomb", "spring", "bucket", "slash", "impact"] as const;
+export const EFFECT_KINDS = ["bomb", "spring", "bucket", "slash", "impact", "damage1", "damage2"] as const;
 export type EffectKind = typeof EFFECT_KINDS[number];
 export const EFFECT_DURATION_MS: Readonly<Record<EffectKind, number>> = Object.freeze({
   bomb: 900, spring: 720, bucket: 860, slash: 260, impact: 340,
+  // Floating damage numbers, which rise and fade above whoever was hit.
+  damage1: 850, damage2: 850,
 });
 export type RoomEffect = Readonly<{ id: number; kind: EffectKind; x: number; y: number; ageMs: number }>;
 
@@ -334,6 +350,8 @@ export type MatchCue =
   /** Your trap caught somebody else. */
   | { kind: "trap-sprung"; trap: TrapType }
   | { kind: "hurt"; amount: number }
+  /** You connected. Carries the damage so the attacker hears a heavier hit for the knife. */
+  | { kind: "hit"; amount: number }
   | { kind: "heal"; amount: number }
   | { kind: "takedown" }
   | { kind: "downed" };
@@ -374,7 +392,9 @@ export type ServerMessage =
   | { t: "match.end"; winner: string | null; winnerName: string | null; reason: string;
       /** Set when the winner reached the gate, which plays the escape sequence. */
       escaped: boolean;
-      results: readonly PublicPlayer[] }
+      results: readonly PublicPlayer[];
+      /** This viewer's own career standing, after the match was folded in. */
+      career: Readonly<{ won: boolean; earned: number; points: number; place: number; of: number }> | null }
   | { t: "leaderboard"; rows: readonly LeaderboardRow[] }
   | { t: "friend.name"; friendName: string | null }
   | { t: "error"; message: string }

@@ -25,8 +25,9 @@ import {
   tutorialSnapshot, type Lesson, type TutorialState,
 } from "./tutorial.ts";
 import {
-  drawAgentPortrait, drawCarryableGlyph, drawEmbassy, drawEscapeScene, drawTitleScreen,
-  doorAnchorWorld, ESCAPE_DURATION_MS, unproject, VIEW_H, VIEW_W, type ActiveEffect,
+  drawAgentPortrait, drawCarryableGlyph, drawEmbassy, drawEscapeScene, drawHurtVignette,
+  drawTitleScreen, doorAnchorWorld, ESCAPE_DURATION_MS, HURT_FLASH_MS, unproject,
+  VIEW_H, VIEW_W, type ActiveEffect,
 } from "./render.ts";
 import { createAudio, type Audio, type SoundCue } from "./audio.ts";
 import {
@@ -102,7 +103,11 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const [serverStats, setServerStats] = useState({ onlinePlayers: 0, activeMatches: 0 });
   const [lobby, setLobby] = useState<LobbyView | null>(null);
   const [match, setMatch] = useState<MatchSnapshot | null>(null);
-  const [results, setResults] = useState<{ winnerName: string | null; reason: string; results: readonly PublicPlayer[] } | null>(null);
+  const [results, setResults] = useState<{
+    winnerName: string | null; reason: string; results: readonly PublicPlayer[];
+    /** This agent's own career standing after the match, or null before the relay sends it. */
+    career: { won: boolean; earned: number; points: number; place: number; of: number } | null;
+  } | null>(null);
   const [feed, setFeed] = useState<readonly MatchEvent[]>([]);
   const [relayError, setRelayError] = useState("");
 
@@ -133,6 +138,9 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const spritesRef = useRef(new Map<string, any>());
   /** Effect id to the local timestamp its animation started at. */
   const effectStartsRef = useRef(new Map<number, number>());
+  /** Screen shake left to spend, in pixels, and when the last blow landed on us. */
+  const shakeRef = useRef(0);
+  const hurtFlashRef = useRef(0);
   const readerRef = useRef<ReturnType<typeof createFriendReader> | null>(null);
   const mapRef = useRef<EmbassyMap | null>(null);
   const predictedRef = useRef<{ room: number; x: number; y: number; facing: Facing; walking: boolean }>(
@@ -284,7 +292,14 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           detail: "Somebody walked into it", tone: "good",
         });
         break;
-      case "hurt": play("hurt"); break;
+      case "hurt":
+        play(value.amount >= 2 ? "hurt-heavy" : "hurt");
+        // A jolt and a red edge, scaled by the blow. Reduced motion keeps the vignette and
+        // drops the shake, since the shake is the part that causes trouble.
+        shakeRef.current = Math.max(shakeRef.current, reducedRef.current ? 0 : value.amount >= 2 ? 13 : 8);
+        hurtFlashRef.current = performance.now();
+        break;
+      case "hit": play(value.amount >= 2 ? "hit-heavy" : "hit"); break;
       case "heal": play("heal"); break;
       case "takedown": play("takedown"); break;
       case "downed":
@@ -399,7 +414,10 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         break;
       case "match.end": {
         const mine = message.winner && message.winner === identityRef.current?.playerId;
-        setResults({ winnerName: message.winnerName, reason: message.reason, results: message.results });
+        setResults({
+          winnerName: message.winnerName, reason: message.reason, results: message.results,
+          career: message.career ?? null,
+        });
         setMatch(null);
         setEnteringMatch(false);
         netRef.current?.send({ t: "leaderboard" });
@@ -785,6 +803,20 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         }
         for (const id of starts.keys()) if (!seen.has(id)) starts.delete(id);
 
+        // Shake decays quickly, and is applied to the world only: the HUD is drawn in CSS
+        // above the canvas, so it stays put while the room lurches.
+        const shake = shakeRef.current;
+        if (shake > 0.2) {
+          shakeRef.current = shake * Math.pow(0.001, delta / 1000);
+          context.save();
+          context.translate(
+            (Math.random() * 2 - 1) * shake,
+            (Math.random() * 2 - 1) * shake * 0.6,
+          );
+        } else {
+          shakeRef.current = 0;
+        }
+
         drawEmbassy(context, {
           snapshot,
           selfX: predictedRef.current.x,
@@ -798,6 +830,13 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           reducedMotion: reducedRef.current,
           timeMs: nowMs,
         });
+        if (shake > 0.2) context.restore();
+
+        // A red vignette over everything, fading over HURT_FLASH_MS.
+        const sinceHurt = nowMs - hurtFlashRef.current;
+        if (hurtFlashRef.current > 0 && sinceHurt < HURT_FLASH_MS) {
+          drawHurtVignette(context, 1 - sinceHurt / HURT_FLASH_MS);
+        }
       }
       frame = requestAnimationFrame(loop);
     };
@@ -1708,11 +1747,27 @@ function EscapeScreen({ escape, sprites, reducedMotion, friendId, onDone }: any)
 }
 
 function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
-  const won = results.results.find((player: PublicPlayer) => player.playerId === identity?.playerId);
+  const career = results.career as
+    | { won: boolean; earned: number; points: number; place: number; of: number }
+    | null;
+  const ordinal = (value: number) => {
+    const tens = value % 100;
+    if (tens >= 11 && tens <= 13) return `${value}th`;
+    return `${value}${["th", "st", "nd", "rd"][value % 10] ?? "th"}`;
+  };
   return <div className="er-results">
     <div className="er-panel">
+      {career && <div className={`er-verdict${career.won ? " er-verdict-won" : ""}`}>
+        <strong>{career.won ? "YOU WON" : "YOU LOST"}</strong>
+        <span>+{career.earned} career {career.earned === 1 ? "point" : "points"}</span>
+      </div>}
       <h2>{results.winnerName ? `${results.winnerName} wins` : "No winner"}</h2>
       <p>{results.reason}</p>
+      {career && <p className="er-standing">
+        <strong>{ordinal(career.place)}</strong> on the career standings, out of {career.of}{" "}
+        {career.of === 1 ? "agent" : "agents"} · <strong>{career.points}</strong>{" "}
+        {career.points === 1 ? "point" : "points"} all told
+      </p>}
       <ol className="er-result-list">
         {results.results.map((player: PublicPlayer, index: number) => <li key={player.playerId}
           className={player.playerId === identity?.playerId ? "er-me" : ""}>
@@ -1721,9 +1776,10 @@ function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
         </li>)}
       </ol>
       <p className="er-fine">
-        These points are added to your Friend's career total on the relay's standings, which persist
-        across matches and restarts. No RF changed hands: kits stay in your simulated FriendSDK
-        inventory whether you win or lose.
+        Career points are one for playing and two more for winning, so the standings reward
+        turning up and coming first rather than a long match. The points beside each agent
+        above are that match's score. Standings persist across matches and restarts. No RF
+        changed hands: kits stay in your simulated FriendSDK inventory whether you win or lose.
       </p>
       <div className="er-row">
         {inLobby && <button type="button" className="er-primary" onClick={onAgain}>Back to the lobby</button>}

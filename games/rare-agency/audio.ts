@@ -18,7 +18,10 @@ export type SoundCue =
   | "trap-bomb" | "trap-spring" | "trap-bucket"
   /** Your own trap catching somebody else, heard from anywhere on the map. */
   | "trap-sprung"
-  | "hurt" | "heal" | "knife" | "takedown" | "downed" | "plant" | "search" | "door"
+  | "hurt" | "hurt-heavy" | "heal" | "knife"
+  /** Landing a blow, heard by whoever threw it. */
+  | "hit" | "hit-heavy"
+  | "takedown" | "downed" | "plant" | "search" | "door"
   | "deny" | "escape" | "lose";
 
 const BPM = 92;
@@ -231,9 +234,25 @@ export function createAudio() {
           tone(hz(N.B3), at, 0.08, { type: "square", gain: 0.16 });
           tone(hz(N.Fs3), at + 0.08, 0.16, { type: "square", gain: 0.16 });
           break;
+        // Taking a hit: a body sound, low and short, with the pitch sagging.
         case "hurt":
           tone(hz(N.A3), at, 0.14, { type: "sawtooth", gain: 0.2, glideTo: hz(N.E3) });
           noise(at, 0.08, { gain: 0.16, frequency: 900, q: 1.2 });
+          break;
+        case "hurt-heavy":
+          tone(hz(N.A3), at, 0.26, { type: "sawtooth", gain: 0.28, glideTo: hz(N.E2) });
+          noise(at, 0.16, { gain: 0.26, frequency: 520, q: 0.9, type: "lowpass" });
+          tone(hz(N.E2), at + 0.05, 0.22, { type: "square", gain: 0.12, glideTo: hz(N.E1) });
+          break;
+        // Landing one: a short percussive knock, so the attacker knows it connected without
+        // waiting to read the log.
+        case "hit":
+          noise(at, 0.06, { gain: 0.3, frequency: 1500, q: 1.1 });
+          tone(hz(N.E3), at, 0.07, { type: "square", gain: 0.16 });
+          break;
+        case "hit-heavy":
+          noise(at, 0.1, { gain: 0.36, frequency: 1100, q: 1 });
+          tone(hz(N.E3), at, 0.12, { type: "square", gain: 0.2, glideTo: hz(N.B3) });
           break;
         case "heal":
           tone(hz(N.E3), at, 0.1, { type: "triangle", gain: 0.2 });

@@ -534,3 +534,23 @@
 }
 .er-quiet[aria-pressed="false"] { border-color: var(--alert); color: var(--alert); }
 .er-top .er-status { display: flex; align-items: center; gap: 0.6em; }
+
+/* --- Match verdict --------------------------------------------------------------------- */
+
+.er-verdict {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1em;
+  flex-wrap: wrap;
+  margin: 0 0 0.6em;
+  padding: 0.45em 0.7em;
+  border: 2px solid var(--alert);
+  border-radius: 6px;
+  background: rgba(228, 87, 46, 0.1);
+}
+.er-verdict strong { font: 800 22px ui-monospace, monospace; color: var(--alert); }
+.er-verdict span { font: 700 13px ui-monospace, monospace; }
+.er-verdict-won { border-color: var(--signal); background: rgba(204, 255, 0, 0.12); }
+.er-verdict-won strong { color: #5f7a00; }
+.er-standing {
+  margin: 0.2em 0 0.6em;
+  font: 600 14px ui-monospace, monospace;
+}

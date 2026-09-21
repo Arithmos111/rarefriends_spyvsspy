@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import {
   INPUT_HZ, LOBBY_AUTOSTART_MS, LOBBY_IDLE_MS, LOBBY_MAX_PLAYERS, LOBBY_MIN_PLAYERS,
   MATCH_SECONDS, PROTOCOL_VERSION, TICK_MS,
-  normaliseFriendName,
+  careerPointsFor, normaliseFriendName,
 } from "../games/rare-agency/shared/protocol.ts";
 import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "../games/rare-agency/shared/mansion.ts";
 import { isKnownKit, kitById } from "../games/rare-agency/shared/loadouts.ts";
@@ -220,7 +220,8 @@ export function createRelay({ log = console.log } = {}) {
         items: player.itemsFound,
         takedowns: player.takedowns,
         deaths: player.deaths,
-        points: scoreOf(match, player),
+        // Career points are turning up and winning, not the match score.
+        points: careerPointsFor(match.winner === player.playerId),
       });
     }
 
@@ -230,7 +231,16 @@ export function createRelay({ log = console.log } = {}) {
     };
     for (const playerId of lobby.members.keys()) {
       const player = players.get(playerId);
-      if (player) send(player, message);
+      if (player) {
+        // Each agent is told their own standing, worked out after this match was folded in.
+        const seat = match.players.get(playerId);
+        const standing = seat ? leaderboard.standing(seat.friendId) : null;
+        const won = Boolean(seat && match.winner === seat.playerId);
+        send(player, {
+          ...message,
+          career: standing ? { won, earned: careerPointsFor(won), ...standing } : null,
+        });
+      }
       const member = lobby.members.get(playerId);
       if (member) member.ready = false;
     }

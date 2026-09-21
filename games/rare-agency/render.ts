@@ -16,7 +16,7 @@ import {
   type Carryable, type DecorType, type Direction, type EffectKind, type FurnitureType,
   type MatchSnapshot, type RoomActor, type RoomDecor, type RoomTrap,
 } from "./shared/protocol.ts";
-import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "./shared/mansion.ts";
+import { CACHE_SLOT, EXIT_RADIUS, EXIT_X, EXIT_Y } from "./shared/mansion.ts";
 
 export const VIEW_W = 960;
 export const VIEW_H = 640;
@@ -98,6 +98,7 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
   context.fillRect(0, 0, VIEW_W, VIEW_H);
 
   drawFloor(context);
+  drawCacheStencil(context, snapshot.furniture);
   drawFloorDecor(context, input.decor);
   drawWalls(context, snapshot.doors);
   drawWallDecor(context, input.decor);
@@ -228,6 +229,43 @@ function drawRoomSign(context: CanvasRenderingContext2D, name: string, doors: re
   }
   context.fillStyle = INK;
   context.fillText(label, ax, top + 19);
+  context.restore();
+}
+
+/**
+ * A painted stencil on the floor under the cache.
+ *
+ * Every room has its cache in the same corner, and mission items are only ever hidden there.
+ * Marking it in every room teaches that rule without a tutorial line: once you have seen the
+ * stencil twice you know where to run in a room you have never entered.
+ */
+function drawCacheStencil(
+  context: CanvasRenderingContext2D, furniture: MatchSnapshot["furniture"],
+): void {
+  const cache = furniture.find(piece => piece.slot === CACHE_SLOT);
+  if (!cache) return;
+  const [sx, sy] = project(cache.x, cache.y);
+  context.save();
+  // Sized to stay inside the floor: the cache sits in a corner, so a wide ring spills past
+  // the room's edge and reads as a rendering fault.
+  context.strokeStyle = "rgba(204,255,0,0.5)";
+  context.lineWidth = 2;
+  context.setLineDash([8, 6]);
+  context.beginPath();
+  context.ellipse(sx, sy + 4, 42 * AX, 42 * BY * 1.3, 0, 0, Math.PI * 2);
+  context.stroke();
+  context.setLineDash([]);
+  // Corner ticks, so it reads as a marked bay rather than a puddle of light.
+  context.strokeStyle = "rgba(204,255,0,0.62)";
+  context.lineWidth = 2.5;
+  for (const [ox, oy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    const [cx, cy] = project(cache.x + ox * 36, cache.y + oy * 36);
+    context.beginPath();
+    context.moveTo(cx - ox * 8 * AX, cy - ox * 8 * BY);
+    context.lineTo(cx, cy);
+    context.lineTo(cx + oy * 8 * AX, cy - oy * 8 * BY);
+    context.stroke();
+  }
   context.restore();
 }
 
@@ -1440,6 +1478,21 @@ function drawEffect(
       context.stroke();
       break;
     }
+    case "damage1":
+    case "damage2": {
+      // Rises and fades above the victim. Two damage reads heavier, in weight and colour.
+      const heavy = effect.kind === "damage2";
+      context.globalAlpha = Math.min(1, fade * 1.7);
+      context.textAlign = "center";
+      context.font = heavy ? "800 26px ui-monospace, monospace" : "700 20px ui-monospace, monospace";
+      context.lineWidth = 4;
+      context.strokeStyle = INK;
+      context.fillStyle = heavy ? ALERT : PAPER;
+      const lift = y - 48 - t * 34;
+      context.strokeText(`-${heavy ? 2 : 1}`, x, lift);
+      context.fillText(`-${heavy ? 2 : 1}`, x, lift);
+      break;
+    }
     case "impact": {
       // A bare fist: a short four-point starburst, no sweep.
       context.globalAlpha = fade;
@@ -1457,6 +1510,30 @@ function drawEffect(
       break;
     }
   }
+  context.restore();
+}
+
+/** How long the red edge lingers after taking a blow. */
+export const HURT_FLASH_MS = 420;
+
+/**
+ * A red vignette over the room after taking a hit.
+ *
+ * Drawn on the canvas rather than as a CSS overlay so it cannot be missed on a phone, where
+ * the HUD already crowds the edges. `strength` runs 1 at the moment of the blow to 0.
+ */
+export function drawHurtVignette(context: CanvasRenderingContext2D, strength: number): void {
+  const peak = Math.max(0, Math.min(1, strength));
+  if (peak <= 0) return;
+  const edge = context.createRadialGradient(
+    VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.28,
+    VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.78,
+  );
+  edge.addColorStop(0, "rgba(228,87,46,0)");
+  edge.addColorStop(1, `rgba(228,87,46,${(0.55 * peak).toFixed(3)})`);
+  context.save();
+  context.fillStyle = edge;
+  context.fillRect(0, 0, VIEW_W, VIEW_H);
   context.restore();
 }
 
@@ -1844,12 +1921,22 @@ export function drawEscapeScene(
   context.textAlign = "center";
   context.fillStyle = PAPER;
   context.font = "700 34px ui-monospace, monospace";
-  context.fillText(options.won ? "EXFILTRATED" : "THE GATE CLOSES", VIEW_W / 2, 92);
-  context.font = "600 17px ui-monospace, monospace";
-  context.fillStyle = SIGNAL;
+  // The verdict first and largest: whoever is watching wants to know if it was them.
+  context.font = "800 46px ui-monospace, monospace";
+  context.fillStyle = options.won ? SIGNAL : ALERT;
+  context.fillText(options.won ? "YOU WON" : "YOU LOST", VIEW_W / 2, 74);
+  context.strokeStyle = INK;
+  context.lineWidth = 2;
+  context.strokeText(options.won ? "YOU WON" : "YOU LOST", VIEW_W / 2, 74);
+
+  context.fillStyle = PAPER;
+  context.font = "700 22px ui-monospace, monospace";
+  context.fillText(options.won ? "EXFILTRATED" : "THE GATE CLOSES", VIEW_W / 2, 108);
+  context.font = "600 16px ui-monospace, monospace";
+  context.fillStyle = "rgba(238,241,228,0.8)";
   context.fillText(
     options.won ? `${name} cleared the embassy with the full set.` : `${name} did not make the flight.`,
-    VIEW_W / 2, 124,
+    VIEW_W / 2, 136,
   );
   context.restore();
 }

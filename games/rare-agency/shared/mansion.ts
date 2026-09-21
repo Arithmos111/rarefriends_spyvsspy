@@ -134,6 +134,48 @@ function decorFor(random: () => number, doors: readonly Direction[]): RoomDecor[
 /** Clearance between two pieces of furniture, so they never touch, let alone interpenetrate. */
 const FURNITURE_GAP = 8;
 
+/**
+ * How far out from a wall an agent stands to reach what hangs on it.
+ *
+ * Nothing standing on the floor may occupy this spot, or the hanging is walled off: the
+ * approach is the only way in, because the wall is behind it and there is no way round.
+ */
+const HANGING_APPROACH = 44;
+
+/** Where an agent must be able to stand to search a hanging. */
+export function approachPoint(piece: Readonly<{ x: number; y: number }>): { x: number; y: number } {
+  return piece.y === 0
+    ? { x: piece.x, y: HANGING_APPROACH }
+    : { x: HANGING_APPROACH, y: piece.y };
+}
+
+/** True when a piece of `type` at (x, y) would stand in the way of reaching a hanging. */
+function blocksApproach(
+  type: FurnitureType, x: number, y: number, hangings: readonly Furniture[],
+): boolean {
+  const { w, h } = FURNITURE_FOOTPRINT[type];
+  return hangings.some(hanging => {
+    const spot = approachPoint(hanging);
+    const nearestX = Math.max(x - w / 2, Math.min(spot.x, x + w / 2));
+    const nearestY = Math.max(y - h / 2, Math.min(spot.y, y + h / 2));
+    const gap = Math.hypot(spot.x - nearestX, spot.y - nearestY);
+    return gap < PLAYER_RADIUS + 6;
+  });
+}
+
+/**
+ * The one piece of furniture in each room that a mission item is ever hidden in.
+ *
+ * Fixing it makes the mansion learnable: once you know a room holds intelligence, you know
+ * exactly where in it to run. It is the same relative spot in every room, and the floor is
+ * stencilled under it so the convention teaches itself.
+ *
+ * Slot 3 is the near-right corner: the most visible spot on screen, and far enough from both
+ * walls that it never competes with the approach to a hanging. Slot 0 did compete, which left
+ * some rooms with no cache at all.
+ */
+export const CACHE_SLOT = 3;
+
 /** True when a piece of `type` at (x, y) would clip a piece already placed. */
 function overlaps(type: FurnitureType, x: number, y: number, other: Furniture): boolean {
   const a = FURNITURE_FOOTPRINT[type];
@@ -166,24 +208,9 @@ export function createMap(seed: number): EmbassyMap {
     // already placed. Desks, tables and benches are wide enough that two adjacent slots can
     // no longer hold any two pieces, and solid furniture growing through solid furniture
     // reads as a rendering fault rather than a room.
-    const furniture: Furniture[] = [];
-    const used = new Set<FurnitureType>();
-    for (const slot of order) {
-      if (furniture.length >= count) break;
-      const [x, y] = SLOTS[slot];
-      // Kinds not yet in this room come first, so a room only repeats itself once its whole
-      // palette is either placed or blocked by what is already standing there.
-      const choices = [...kinds.filter(kind => !used.has(kind)), ...kinds];
-      const type = choices.find(kind => !furniture.some(other => overlaps(kind, x, y, other)));
-      if (!type) continue;
-      used.add(type);
-      furniture.push({
-        id: index * 100 + slot, slot, type, x, y,
-        contents: null, searched: false, emptied: false,
-      });
-    }
-    // Hangings go up after the floor is furnished, on anchors clear of the name plate and of
-    // each other. They do not compete for floor slots, so a room gets both.
+    // Hangings go up first, on anchors clear of the name plate. The floor is then laid
+    // around them: nothing may stand where an agent has to stand to reach one.
+    const hangingPieces: Furniture[] = [];
     const hangings = ROOM_WALL_FURNITURE[index] ?? [];
     const wallOrder = WALL_FURNITURE_SPOTS.map((_, slot) => slot)
       .filter(slot => clearOfSign(WALL_FURNITURE_SPOTS[slot], roomDoors(index)));
@@ -195,11 +222,32 @@ export function createMap(seed: number): EmbassyMap {
       const slot = wallOrder[pick];
       if (slot === undefined) return;
       const [x, y] = WALL_FURNITURE_SPOTS[slot];
-      furniture.push({
+      hangingPieces.push({
         id: index * 100 + WALL_FURNITURE_SLOT_BASE + slot, slot: WALL_FURNITURE_SLOT_BASE + slot,
         type, x, y, contents: null, searched: false, emptied: false,
       });
     });
+
+    const furniture: Furniture[] = [];
+    const used = new Set<FurnitureType>();
+    // The cache slot is furnished first and always, so every room has one and it is always
+    // in the same place.
+    for (const slot of [CACHE_SLOT, ...order.filter(entry => entry !== CACHE_SLOT)]) {
+      if (furniture.length >= count) break;
+      const [x, y] = SLOTS[slot];
+      // Kinds not yet in this room come first, so a room only repeats itself once its whole
+      // palette is either placed or blocked by what is already standing there.
+      const choices = [...kinds.filter(kind => !used.has(kind)), ...kinds];
+      const type = choices.find(kind => !furniture.some(other => overlaps(kind, x, y, other))
+        && !blocksApproach(kind, x, y, hangingPieces));
+      if (!type) continue;
+      used.add(type);
+      furniture.push({
+        id: index * 100 + slot, slot, type, x, y,
+        contents: null, searched: false, emptied: false,
+      });
+    }
+    furniture.push(...hangingPieces);
 
     furniture.sort((a, b) => a.id - b.id);
     rooms.push({
@@ -224,11 +272,14 @@ export function placeMissionItems(map: EmbassyMap, seed: number): void {
     return values;
   };
 
+  // Which rooms hold intelligence still varies; where inside a room does not. Every room
+  // has a cache at the same spot, so once you know a room is worth searching you know
+  // exactly where to run.
   const candidates = shuffle(map.rooms.map(room => room.index).filter(index => index !== map.exitRoom));
   MISSION_ITEMS.forEach((item, position) => {
     const room = map.rooms[candidates[position]];
-    const choice = room.furniture[Math.floor(random() * room.furniture.length)];
-    choice.contents = item;
+    const cache = room.furniture.find(piece => piece.slot === CACHE_SLOT);
+    if (cache) cache.contents = item;
   });
 
   // One knife, two vests and three medkits, spread over the furniture nothing else claimed.
