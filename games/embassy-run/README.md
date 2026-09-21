@@ -40,7 +40,7 @@ against yourself. The printed LAN URL works from a phone on the same wifi.
 | Tap or click furniture in reach | Search it |
 | **E** or the action button | Search, pick up, or escape — whichever is in reach |
 | **F** | Strike the nearest agent |
-| **Q** or the trap button | Open the trap menu for the furniture you are standing at |
+| **Q** or the trap button | Open the trap menu for the furniture **or doorway** you are standing at |
 | **1 / 2 / 3** | Set a letter bomb, spring trap or water bucket directly |
 | **Esc** | Close a menu |
 
@@ -60,8 +60,12 @@ and a disguise kit — are each hidden in one piece of furniture, in four differ
 rooms, never in the gate room. Searching takes 0.9s, or 0.55s with a lockpick.
 Searched furniture stays searched for everyone.
 
-**Traps.** Set a trap inside any untrapped piece of furniture you are standing at.
-It springs on anyone who searches that furniture except you. One trap per piece.
+**Traps.** Set a trap inside any untrapped piece of furniture, **or rig a doorway**. One trap
+per target. A trapped doorway springs on the next agent who walks through it.
+
+**Your own traps are live against you.** Forget where you left a letter bomb and it will take
+you out exactly as it would a rival, and you get no credit for it. A disarm tool recovers any
+trap including your own, returning it to your kit.
 
 | Trap | Effect |
 | --- | --- |
@@ -72,15 +76,53 @@ It springs on anyone who searches that furniture except you. One trap per piece.
 A trap detector reveals rival traps in your current room. A disarm tool removes a
 rival trap and adds it to your own stock.
 
-**Fighting.** Strike an agent within range. Two hits take them down. Attacks have a
-1.2s cooldown, and agents are protected for 1.5s after spawning.
+**Fighting.** Agents have **5 health**. A bare-handed strike takes 1, so five landed blows put
+someone down. Attacks have a 0.75s cooldown and agents are protected for 1.5s after spawning.
+Lethal traps ignore health entirely.
+
+**Power-ups** are hidden in furniture alongside the intelligence, and picking one up applies it
+immediately.
+
+| Power-up | Effect |
+| --- | --- |
+| Field medkit | Restores 3 health, up to your maximum |
+| Ballistic vest | Raises your maximum health by 1, and heals you for it. Respawns restore the raised maximum |
+| Stiletto knife | Your strikes hit for 2 instead of 1 |
+
+**There is exactly one knife per match.** It is a random drop hidden in one piece of furniture.
+Whoever carries it shows a knife badge above their head, so the room knows who to avoid, and
+they drop it where they fall when taken down. It keeps circulating all match.
 
 **Being taken out.** You drop everything you are carrying on the floor of that room,
 where anyone can pick it up, and you return at your starting room after 4 seconds.
 
-**Winning.** Carry all four items to the courtyard gate in the centre room and
-escape. If the 5-minute clock runs out first, the agent holding the most
-intelligence wins; a tie means nobody wins.
+**Winning.** Carry all four items to the courtyard gate in the centre room and escape, which
+plays out as a run across the apron to a waiting aircraft. If the 5-minute clock runs out first,
+the agent holding the most intelligence wins; a tie means nobody wins.
+
+**Scoring and career standings.** Every finished match adds to a running total kept per Rare
+Friend on the relay, which survives restarts and redeploys.
+
+| Award | Points |
+| --- | --- |
+| Escaping with the full set | 100 |
+| Leading on intelligence when time expires | 40 |
+| Each item recovered and still held | 10 |
+| Each takedown | 5 |
+| Surviving to the end | 5 |
+
+Items you are carrying stop counting the moment you drop them, so holding a lead means staying
+alive. A trap you set yourself is nobody's takedown. Standings are reachable from the briefing
+room.
+
+**Naming your Friend.** From the briefing room you can give your Friend a name, shown in
+parentheses after your codename everywhere: `FALCON (Nightjar)`. The name belongs to the Friend
+rather than to the session, so it comes back next time you connect.
+
+**Reading the screen.** The match header carries a nine-cell plan of the embassy showing where
+you are, where you have already been and where the gate is; a four-slot mission track showing
+which intelligence you hold and which is still out there; and a health bar. Picking anything up
+flashes its icon and name in the centre of the screen.
 
 ## Economy — exact values
 
@@ -199,11 +241,18 @@ widths.
 
 ## Assets
 
-All embassy artwork — floors, walls, furniture, doorways, the gate, traps and items —
-is drawn procedurally on a canvas by `render.ts` in this directory. There are no
-third-party image, font or audio files. Sound effects come from the SDK's own sound
-kit. Rare Friend character sprites are the canonical on-chain artwork, read through
-the SDK and never modified.
+All embassy artwork — floors, walls, furniture, doorways, room signs, wall decoration, the
+gate, traps, item glyphs and the escape sequence — is drawn procedurally on a canvas by
+`render.ts` in this directory. There are no third-party image or font files.
+
+**All audio is synthesised at runtime**, in `audio.ts`, using Web Audio oscillators and
+filtered noise. There are no audio files to download or license. The background music is a slow
+spy-movie ostinato in E minor at 92 BPM, built from a triangle-wave walking bass, a sparse
+square-wave answering line and noise percussion. Sound effects are short enveloped tones from
+the same synthesis. The SDK's own sound kit is still used for the economy actions.
+
+Rare Friend character sprites are the canonical on-chain artwork, read through the SDK and
+never modified.
 
 The palette follows the Rare Friends direction: pale monochrome scenery with black
 line art and signal green `#CCFF00` marking everything interactive, plus one alert

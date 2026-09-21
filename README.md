@@ -4,10 +4,16 @@ A four-player **Spy vs Spy–style** stealth game for the
 [Rare Friends Vibeathon](https://github.com/spokesz/rarefriends-vibeathon), built on
 [FriendSDK v0.1](https://github.com/spokesz/friendsdk).
 
-Your Rare Friend is a spy inside a nine-room embassy. Four pieces of intelligence are
-hidden in the furniture. Search for them, booby-trap the furniture behind you, and
-reach the courtyard gate with the full set before your rivals do. Two to four agents
-share an embassy, with matchmaking lobbies so dozens can play at once.
+Your Rare Friend is a spy inside a nine-room embassy. Four pieces of intelligence are hidden in
+the furniture. Search for them, booby-trap the furniture and doorways behind you, and reach the
+courtyard gate with the full set before your rivals do. Two to four agents share an embassy,
+with matchmaking lobbies so dozens can play at once.
+
+Agents have five health and start bare-handed. Hidden alongside the intelligence are medkits,
+ballistic vests, and exactly one stiletto knife that doubles your damage and drops where its
+carrier falls. Traps are live against whoever set them, so remember where you left that letter
+bomb. Every finished match feeds a career leaderboard kept per Rare Friend, and you can give
+your Friend a name that shows in parentheses after your codename.
 
 The game rules, controls, exact economy and known issues are in
 **[games/embassy-run/README.md](games/embassy-run/README.md)**.

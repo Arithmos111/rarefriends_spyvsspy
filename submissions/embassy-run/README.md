@@ -1,6 +1,6 @@
 # Embassy Run — four-player Spy vs Spy
 
-Up to four Rare Friends raid one embassy for four pieces of hidden intelligence, booby-trapping the furniture behind them, racing to escape through the courtyard gate.
+Up to four Rare Friends raid one embassy for four pieces of hidden intelligence, booby-trapping the furniture and doorways behind them, racing to escape through the courtyard gate before the others.
 
 **Builder:** [@Arithmos111](https://github.com/Arithmos111) · **Category:** Economy Potential · **SDK:** FriendSDK v0.1 (0.1.0)
 
@@ -32,9 +32,15 @@ Move with WASD, arrow keys, the on-screen stick, or by tapping a destination. **
 
 Nine rooms in a 3×3 block. You see only the room you are standing in, so rivals are invisible until you walk in on them. Four items — secret documents, a forged passport, bearer bonds and a disguise kit — are each hidden in one piece of furniture in four different rooms. Searching takes 0.9s, or 0.55s with a lockpick.
 
-Set a trap inside any untrapped furniture you are standing at; it springs on anyone who searches it except you. Letter bombs and spring traps take the searcher out, and a water bucket freezes them for 3 seconds. Being taken out drops everything you carry on that room's floor for anyone to collect, and you return after 4 seconds. Two strikes also take an agent down.
+Set a trap inside any untrapped furniture, or rig a doorway. Letter bombs and spring traps take the victim out; a water bucket freezes them for 3 seconds. **Your own traps are live against you**, and catching yourself is nobody's takedown. A disarm tool recovers any trap, including your own.
 
-Carry all four items to the courtyard gate in the centre room to win. If the 5-minute clock expires first, the agent holding the most intelligence wins; a tie means nobody does. Settings (≡) hold mute and reduce-motion; failed Friend artwork can be retried. Everything stays inside the SDK's 960 × 640 container.
+Agents have **5 health**. A strike takes 1, or 2 with the stiletto. Hidden alongside the intelligence are medkits (restore 3), ballistic vests (raise the maximum by 1) and **exactly one stiletto knife per match**, a random drop that doubles damage, badges its carrier so the room can see them, and falls where they fall. Being taken out drops everything you carry, knife included, and you return after 4 seconds.
+
+Carry all four items to the courtyard gate in the centre room to win, which plays out as a run across an airport apron to a waiting aircraft. If the 5-minute clock expires first, the agent holding the most intelligence wins; a tie means nobody does.
+
+The match header carries a nine-cell plan of the embassy, a four-slot mission track showing what you hold and what is still missing, and a health bar. Picking anything up flashes its icon and name centre-screen. Settings (≡) hold mute, music and reduce-motion; failed Friend artwork can be retried. Everything stays inside the SDK's 960 × 640 container.
+
+**Career standings.** Every finished match adds to a total kept per Rare Friend on the relay, persisted to disk so it survives restarts: 100 for escaping with the full set, 40 for leading on time, 10 per item still held, 5 per takedown, 5 for surviving. Items stop counting once dropped. Players can also name their Friend, shown in parentheses after the codename everywhere, stored against the Friend rather than the session.
 
 ## Rules and rewards
 
@@ -64,7 +70,7 @@ This repository additionally runs `npm run check`: typecheck, 23 simulation test
 
 Browser tests use the SDK's own internal identity fixture for mocked wallets and RPC; **a real-wallet playthrough is still outstanding.** The Dockerfile could not be built in the development environment because its network policy blocks Docker Hub's blob CDN; its runtime file set and healthcheck were verified directly instead.
 
-All embassy artwork — floors, walls, furniture, doorways, the gate, traps and items — is drawn procedurally on a canvas. **There are no third-party image, font or audio assets.** Sounds come from the SDK's sound kit. Rare Friend sprites are the canonical on-chain artwork read through the SDK's public sprite reader at 5× integer scale in an 80 × 80 box with the canonical white one-pixel halo over the black mask, never rotated, stretched, smoothed, recoloured or regenerated; Colossus Friends use the SDK's explicit horizontal fallback.
+All embassy artwork — floors, walls, furniture, doorways, room name plates, wall dressing, the gate, traps, item glyphs and the escape sequence — is drawn procedurally on a canvas. **There are no third-party image, font or audio assets.** All audio is synthesised at runtime with Web Audio oscillators and filtered noise: the background music is a slow spy-movie ostinato in E minor at 92 BPM over a triangle-wave walking bass, and every sound effect is a short enveloped tone from the same synthesis. The SDK's sound kit is still used for economy actions. Rare Friend sprites are the canonical on-chain artwork read through the SDK's public sprite reader at 5× integer scale in an 80 × 80 box with the canonical white one-pixel halo over the black mask, never rotated, stretched, smoothed, recoloured or regenerated; Colossus Friends use the SDK's explicit horizontal fallback.
 
 **SDK feedback from a live deployment.** A wallet on the wrong chain is indistinguishable from owning no Friends. `GameHost` only runs `readOwnedFriends` once the wallet session reports chain 4663; on any other chain it never queries, yet the picker still renders "No playable Friends found" directly beneath the "Switch your wallet to Robinhood mainnet (4663)" alert. The definitive-sounding message is the one people act on, and this cost real debugging time while deploying this entry with six eligible Friends in the connected wallet. Suppressing the empty-list message while `wallet.status === "wrong-network"` would resolve it. A game cannot work around this, since the picker and the ownership gate are trusted runtime code that runs before the game component mounts. Relatedly, "hardwired" is load-bearing but easy to miss: a temporary, balance-dependent Friend with no permanent token-bound wallet is not eligible, and the picker does not distinguish it from a wrong-network result either.
 

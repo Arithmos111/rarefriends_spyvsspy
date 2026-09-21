@@ -7,9 +7,9 @@
  * contents and learns what a piece of furniture held when the server tells it.
  */
 import {
-  FURNITURE_FOOTPRINT, FURNITURE_TYPES, GRID_W, MISSION_ITEMS, PLAYER_RADIUS,
+  DECOR_TYPES, FURNITURE_FOOTPRINT, FURNITURE_TYPES, GRID_W, MISSION_ITEMS, PLAYER_RADIUS,
   ROOM_COUNT, ROOM_H, ROOM_NAMES, ROOM_W, roomDoors,
-  type Direction, type FurnitureType, type MissionItem,
+  type Carryable, type DecorType, type Direction, type FurnitureType, type RoomDecor,
 } from "./protocol.ts";
 
 /** Room 4 is the centre of the 3x3 block, equidistant from all four corner spawns. */
@@ -23,10 +23,11 @@ export const SPAWN_ROOMS: readonly number[] = Object.freeze([0, 2, 6, 8]);
 
 export type Furniture = {
   id: number; slot: number; type: FurnitureType; x: number; y: number;
-  contents: MissionItem | null; searched: boolean; emptied: boolean;
+  contents: Carryable | null; searched: boolean; emptied: boolean;
 };
 export type Room = {
-  index: number; name: string; doors: readonly Direction[]; furniture: Furniture[];
+  index: number; name: string; doors: readonly Direction[];
+  furniture: Furniture[]; decor: readonly RoomDecor[];
 };
 export type EmbassyMap = { seed: number; rooms: Room[]; exitRoom: number };
 
@@ -52,6 +53,42 @@ const SLOTS: readonly (readonly [number, number])[] = Object.freeze([
   [52, 96], [52, 264], [468, 96], [468, 264],
 ]);
 
+/**
+ * Decorative anchors. Wall pieces hang along the two far edges; floor pieces sit in open
+ * ground. None of these collide, so they can go anywhere the eye wants them.
+ */
+const WALL_SPOTS: readonly (readonly [number, number])[] = Object.freeze([
+  [120, 0], [260, 0], [400, 0], [0, 110], [0, 250],
+]);
+const FLOOR_SPOTS: readonly (readonly [number, number])[] = Object.freeze([
+  [260, 200], [150, 240], [370, 240], [260, 300],
+]);
+const WALL_DECOR: readonly DecorType[] = Object.freeze(["portrait", "banner", "clock", "flag"]);
+const FLOOR_DECOR: readonly DecorType[] = Object.freeze(["rug", "lamp", "bookshelf"]);
+
+function decorFor(random: () => number): RoomDecor[] {
+  const decor: RoomDecor[] = [];
+  const wallOrder = WALL_SPOTS.map((_, index) => index);
+  for (let i = wallOrder.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [wallOrder[i], wallOrder[j]] = [wallOrder[j], wallOrder[i]];
+  }
+  for (const slot of wallOrder.slice(0, 2 + Math.floor(random() * 2))) {
+    const [x, y] = WALL_SPOTS[slot];
+    decor.push({ type: WALL_DECOR[Math.floor(random() * WALL_DECOR.length)], x, y, variant: Math.floor(random() * 4) });
+  }
+  const floorOrder = FLOOR_SPOTS.map((_, index) => index);
+  for (let i = floorOrder.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [floorOrder[i], floorOrder[j]] = [floorOrder[j], floorOrder[i]];
+  }
+  for (const slot of floorOrder.slice(0, 1 + Math.floor(random() * 2))) {
+    const [x, y] = FLOOR_SPOTS[slot];
+    decor.push({ type: FLOOR_DECOR[Math.floor(random() * FLOOR_DECOR.length)], x, y, variant: Math.floor(random() * 4) });
+  }
+  return decor;
+}
+
 export function createMap(seed: number): EmbassyMap {
   const random = createRandom(seed);
   const rooms: Room[] = [];
@@ -68,23 +105,41 @@ export function createMap(seed: number): EmbassyMap {
       const [x, y] = SLOTS[slot];
       return { id: index * 100 + slot, slot, type, x, y, contents: null, searched: false, emptied: false };
     }).sort((a, b) => a.id - b.id);
-    rooms.push({ index, name: ROOM_NAMES[index] ?? `Room ${index + 1}`, doors: roomDoors(index), furniture });
+    rooms.push({
+      index, name: ROOM_NAMES[index] ?? `Room ${index + 1}`, doors: roomDoors(index),
+      furniture, decor: Object.freeze(decorFor(random)),
+    });
   }
   return { seed, rooms, exitRoom: EXIT_ROOM };
 }
 
-/** Server-side only: hide one mission item per room, in four distinct non-exit rooms. */
+/**
+ * Server-side only. Hides the four mission items in four distinct non-exit rooms, then
+ * scatters power-ups through whatever furniture is still empty. Exactly one knife exists.
+ */
 export function placeMissionItems(map: EmbassyMap, seed: number): void {
   const random = createRandom(seed ^ 0x9e3779b9);
-  const candidates = map.rooms.map(room => room.index).filter(index => index !== map.exitRoom);
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-  }
+  const shuffle = <T,>(values: T[]) => {
+    for (let i = values.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [values[i], values[j]] = [values[j], values[i]];
+    }
+    return values;
+  };
+
+  const candidates = shuffle(map.rooms.map(room => room.index).filter(index => index !== map.exitRoom));
   MISSION_ITEMS.forEach((item, position) => {
     const room = map.rooms[candidates[position]];
     const choice = room.furniture[Math.floor(random() * room.furniture.length)];
     choice.contents = item;
+  });
+
+  // One knife, two vests and three medkits, spread over the furniture nothing else claimed.
+  const free = shuffle(map.rooms.flatMap(room => room.furniture.filter(piece => piece.contents === null)));
+  const loot: Carryable[] = ["knife", "vest", "vest", "medkit", "medkit", "medkit"];
+  loot.forEach((item, index) => {
+    const piece = free[index];
+    if (piece) piece.contents = item;
   });
 }
 

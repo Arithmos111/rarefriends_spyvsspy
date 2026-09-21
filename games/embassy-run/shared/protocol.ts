@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -46,10 +46,15 @@ export const DISARM_MS = 850;
 export const INTERACT_RANGE = 74;
 
 export const ATTACK_RANGE = 46;
-export const ATTACK_COOLDOWN_MS = 1200;
+/** Five hit points means a brawl needs five landed blows, so the swing rate is quicker. */
+export const ATTACK_COOLDOWN_MS = 750;
 export const ATTACK_WINDUP_MS = 180;
-export const HIT_STUN_MS = 520;
-export const PLAYER_MAX_HP = 2;
+export const HIT_STUN_MS = 380;
+export const PLAYER_MAX_HP = 5;
+/** A vest raises an agent's ceiling above the starting maximum. */
+export const PLAYER_HP_CEILING = 8;
+export const FIST_DAMAGE = 1;
+export const KNIFE_DAMAGE = 2;
 export const RESPAWN_MS = 4000;
 export const BUCKET_STUN_MS = 3000;
 export const SPAWN_INVULNERABLE_MS = 1500;
@@ -69,6 +74,31 @@ export const MISSION_ITEM_LABELS: Readonly<Record<MissionItem, string>> = Object
   cash: "Bearer bonds",
   disguise: "Disguise kit",
 });
+
+export const POWER_UPS = ["medkit", "vest", "knife"] as const;
+export type PowerUp = typeof POWER_UPS[number];
+export const POWER_UP_LABELS: Readonly<Record<PowerUp, string>> = Object.freeze({
+  medkit: "Field medkit",
+  vest: "Ballistic vest",
+  knife: "Stiletto knife",
+});
+export const POWER_UP_BLURBS: Readonly<Record<PowerUp, string>> = Object.freeze({
+  medkit: "Restores 3 health, up to your maximum.",
+  vest: "Raises your maximum health by 1 and heals you for it.",
+  knife: "Your strikes hit for 2 instead of 1. Only one exists per match.",
+});
+/** A medkit restores this much; a vest adds this much ceiling. */
+export const MEDKIT_HEAL = 3;
+export const VEST_BONUS_HP = 1;
+
+/** Anything an agent can be carrying or find. Mission items are what the gate needs. */
+export type Carryable = MissionItem | PowerUp;
+export function isPowerUp(value: Carryable): value is PowerUp {
+  return (POWER_UPS as readonly string[]).includes(value);
+}
+export function carryableLabel(value: Carryable): string {
+  return isPowerUp(value) ? POWER_UP_LABELS[value] : MISSION_ITEM_LABELS[value];
+}
 
 export const TRAP_TYPES = ["bomb", "spring", "bucket"] as const;
 export type TrapType = typeof TRAP_TYPES[number];
@@ -94,10 +124,31 @@ export const FURNITURE_FOOTPRINT: Readonly<Record<FurnitureType, Readonly<{ w: n
   locker: { w: 50, h: 42 }, console: { w: 74, h: 46 }, planter: { w: 46, h: 46 }, painting: { w: 60, h: 26 },
 });
 
+/** Purely decorative room dressing. Drawn from the map seed, never collidable. */
+export const DECOR_TYPES = ["rug", "portrait", "banner", "lamp", "clock", "bookshelf", "flag"] as const;
+export type DecorType = typeof DECOR_TYPES[number];
+export type RoomDecor = Readonly<{ type: DecorType; x: number; y: number; variant: number }>;
+
+/**
+ * Trap targets share one id space so a single number identifies either. Furniture uses
+ * roomIndex * 100 + slot (slots 0-11); doorways use roomIndex * 100 + 80 + direction index.
+ */
+export const DOOR_TRAP_BASE = 80;
+export function doorTrapId(roomIndex: number, direction: Direction): number {
+  return roomIndex * 100 + DOOR_TRAP_BASE + DIRECTIONS.indexOf(direction);
+}
+export function isDoorTrapId(id: number): boolean {
+  return id % 100 >= DOOR_TRAP_BASE;
+}
+export function doorTrapDirection(id: number): Direction {
+  return DIRECTIONS[(id % 100) - DOOR_TRAP_BASE];
+}
+
 export type PlayerAction =
   | { kind: "search"; furnitureId: number }
-  | { kind: "plant"; furnitureId: number; trap: TrapType }
-  | { kind: "disarm"; furnitureId: number }
+  /** targetId is a furniture id or a doorway id; see doorTrapId. */
+  | { kind: "plant"; targetId: number; trap: TrapType }
+  | { kind: "disarm"; targetId: number }
   | { kind: "pickup"; dropId: number }
   | { kind: "attack" }
   | { kind: "escape" }
@@ -112,6 +163,8 @@ export type ClientMessage =
   | { t: "lobby.leave" }
   | { t: "lobby.ready"; ready: boolean }
   | { t: "lobby.kit"; kitId: string }
+  | { t: "friend.name"; name: string }
+  | { t: "leaderboard" }
   | { t: "lobby.start" }
   | { t: "input"; seq: number; dx: number; dy: number }
   | { t: "action"; seq: number; action: PlayerAction }
@@ -124,42 +177,88 @@ export type LobbySummary = Readonly<{
 
 export type LobbyMember = Readonly<{
   playerId: string; codename: string; friendId: string; ready: boolean;
-  isHost: boolean; kitId: string; genesis: boolean;
+  isHost: boolean; kitId: string; genesis: boolean; friendName: string | null;
 }>;
 
 export type PublicPlayer = Readonly<{
   playerId: string; codename: string; friendId: string; genesis: boolean;
-  items: number; deaths: number; connected: boolean;
+  friendName: string | null;
+  items: number; deaths: number; takedowns: number; connected: boolean;
+  hasKnife: boolean; score: number;
 }>;
+
+/** Career totals, kept per Friend across every match the relay has hosted. */
+export type LeaderboardRow = Readonly<{
+  friendId: string; friendName: string | null; codename: string;
+  matches: number; wins: number; escapes: number;
+  items: number; takedowns: number; deaths: number; points: number;
+}>;
+
+export const MAX_FRIEND_NAME = 18;
+/** Letters, digits, spaces, apostrophes and hyphens. Rendered in parentheses after the Friend. */
+export const FRIEND_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 '\-]{0,17}$/;
+export function normaliseFriendName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\s+/g, " ").slice(0, MAX_FRIEND_NAME);
+  return trimmed && FRIEND_NAME_PATTERN.test(trimmed) ? trimmed : null;
+}
+/** How a Friend is shown wherever there is room for it. */
+export function displayName(codename: string, friendName: string | null): string {
+  return friendName ? `${codename} (${friendName})` : codename;
+}
+
+/** Points awarded once per match, totalled into the career leaderboard. */
+export const SCORE_ESCAPE = 100;
+export const SCORE_PER_ITEM = 10;
+export const SCORE_PER_TAKEDOWN = 5;
+export const SCORE_TIME_WIN = 40;
+export const SCORE_SURVIVED = 5;
 
 /** A player as seen inside the viewer's own room. */
 export type RoomActor = Readonly<{
   playerId: string; friendId: string; codename: string; genesis: boolean;
+  friendName: string | null;
   x: number; y: number; facing: "up" | "down" | "left" | "right"; walking: boolean;
-  hp: number; stunnedMs: number; attackingMs: number; invulnerableMs: number; busy: BusyState | null;
+  hp: number; maxHp: number; hasKnife: boolean;
+  stunnedMs: number; attackingMs: number; invulnerableMs: number; busy: BusyState | null;
 }>;
 
-export type BusyState = Readonly<{ kind: "search" | "plant" | "disarm"; furnitureId: number; progress: number }>;
+export type BusyState = Readonly<{ kind: "search" | "plant" | "disarm"; targetId: number; progress: number }>;
 
 export type RoomFurniture = Readonly<{
   id: number; type: FurnitureType; x: number; y: number;
   searched: boolean; emptied: boolean;
-  /** Present only when the viewer planted it or can detect it. */
-  trap: TrapType | null;
-  trapMine: boolean;
 }>;
 
-export type RoomDrop = Readonly<{ id: number; item: MissionItem; x: number; y: number }>;
+export type RoomDrop = Readonly<{ id: number; item: Carryable; x: number; y: number }>;
+
+/** A trap the viewer is allowed to see, on furniture or on a doorway. */
+export type RoomTrap = Readonly<{ targetId: number; type: TrapType; mine: boolean }>;
+
+/** Centre-screen pickup flash, and other one-shot presentation cues. */
+export type MatchCue =
+  | { kind: "pickup"; item: Carryable }
+  | { kind: "trap"; trap: TrapType }
+  | { kind: "hurt"; amount: number }
+  | { kind: "heal"; amount: number }
+  | { kind: "takedown" }
+  | { kind: "downed" };
 
 export type MatchSnapshot = Readonly<{
   t: "snapshot"; tick: number; ackSeq: number; secondsLeft: number;
   roomIndex: number; roomName: string;
   doors: readonly ("north" | "south" | "east" | "west")[];
   exitHere: boolean;
-  self: RoomActor & Readonly<{ inventory: readonly MissionItem[]; traps: Readonly<Record<TrapType, number>>;
-    hasDetector: boolean; hasLockpick: boolean; hasDisarm: boolean; respawnMs: number }>;
+  self: RoomActor & Readonly<{
+    inventory: readonly MissionItem[];
+    powerUps: readonly PowerUp[];
+    traps: Readonly<Record<TrapType, number>>;
+    hasDetector: boolean; hasLockpick: boolean; hasDisarm: boolean; respawnMs: number;
+  }>;
   actors: readonly RoomActor[];
   furniture: readonly RoomFurniture[];
+  /** Only traps the viewer planted, or can see with a detector. Covers furniture and doorways. */
+  traps: readonly RoomTrap[];
   drops: readonly RoomDrop[];
   scoreboard: readonly PublicPlayer[];
 }>;
@@ -167,7 +266,7 @@ export type MatchSnapshot = Readonly<{
 export type MatchEvent = Readonly<{ at: number; text: string; tone: "info" | "good" | "bad" | "alert" }>;
 
 export type ServerMessage =
-  | { t: "hello.ok"; playerId: string; codename: string; genesis: boolean; protocol: number }
+  | { t: "hello.ok"; playerId: string; codename: string; genesis: boolean; protocol: number; friendName: string | null }
   | { t: "lobby.list"; lobbies: readonly LobbySummary[]; onlinePlayers: number; activeMatches: number }
   | { t: "lobby.state"; code: string; name: string; isPrivate: boolean; members: readonly LobbyMember[];
       state: "waiting" | "starting" | "playing"; startsInMs: number | null }
@@ -175,8 +274,13 @@ export type ServerMessage =
   | { t: "match.start"; roomNames: readonly string[]; gridW: number; gridH: number; exitRoom: number; seed: number }
   | MatchSnapshot
   | { t: "events"; events: readonly MatchEvent[] }
+  | { t: "cues"; cues: readonly MatchCue[] }
   | { t: "match.end"; winner: string | null; winnerName: string | null; reason: string;
+      /** Set when the winner reached the gate, which plays the escape sequence. */
+      escaped: boolean;
       results: readonly PublicPlayer[] }
+  | { t: "leaderboard"; rows: readonly LeaderboardRow[] }
+  | { t: "friend.name"; friendName: string | null }
   | { t: "error"; message: string }
   | { t: "pong"; at: number };
 

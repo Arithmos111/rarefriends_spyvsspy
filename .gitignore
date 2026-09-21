@@ -8,3 +8,6 @@ vendor/
 
 # Local environment. Never commit this.
 .env
+
+# Runtime leaderboard state (RF_DATA_DIR default).
+data/

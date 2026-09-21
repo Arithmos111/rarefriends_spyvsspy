@@ -194,6 +194,14 @@ There is no draining. Deploy between sessions, not mid-event.
 Keep the `caddy_data` volume. It holds your certificates, and destroying it forces re-issuance
 against Let's Encrypt's rate limits.
 
+Keep the `embassy_data` volume too. It holds the career leaderboard as a single JSON file at
+`/data/leaderboard.json`, written atomically so a crash mid-save cannot corrupt it. Destroying
+that volume wipes every career total. To back it up:
+
+```sh
+docker compose exec game cat /data/leaderboard.json > leaderboard-backup.json
+```
+
 ### Troubleshooting
 
 | Symptom | Cause and fix |

@@ -95,11 +95,36 @@ try {
   // Walk agent one onto its nearest furniture and open the trap menu for a busier frame.
   const canvas = one.child.locator(".er-canvas");
   const box = await canvas.boundingBox();
+  const scale = Math.min(box.width / 960, box.height / 640);
   const [tx, ty] = project(Number(await canvas.getAttribute("data-near-x")), Number(await canvas.getAttribute("data-near-y")));
-  await canvas.click({ position: { x: tx * box.width / 960, y: ty * box.height / 640 } });
+  await canvas.click({ position: {
+    x: tx * scale + (box.width - 960 * scale) / 2,
+    y: ty * scale + (box.height - 640 * scale) / 2,
+  } });
   await one.page.waitForTimeout(1800);
   await one.child.getByRole("button", { name: /^Trap/ }).click().catch(() => {});
   await shot(one.page, "6-trap-menu");
+  await one.child.getByRole("button", { name: /^Close Set a trap/ }).click().catch(() => {});
+
+  // A few searches for a pickup flash. Loot placement is seeded, so this is opportunistic
+  // rather than guaranteed; the run continues either way.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (await one.child.locator(".er-flash").count()) break;
+    await one.child.getByRole("button", { name: /^Search/ }).click().catch(() => {});
+    await one.page.waitForTimeout(900);
+  }
+  if (await one.child.locator(".er-flash").count()) await shot(one.page, "7-pickup-flash");
+  else console.log("  (no pickup flash this run)");
+
+  // The career standings and the Friend naming screen, both from the briefing room.
+  await one.child.getByRole("button", { name: "Leave", exact: true }).click().catch(() => {});
+  await one.page.waitForTimeout(800);
+  await one.child.getByRole("button", { name: /^Standings/ }).click().catch(() => {});
+  await shot(one.page, "8-standings");
+  await one.child.getByRole("button", { name: /^Close Career standings/ }).click().catch(() => {});
+  await one.child.getByRole("button", { name: /^Name Friend|^Rename/ }).click().catch(() => {});
+  await one.child.locator(".er-field input").fill("Nightjar").catch(() => {});
+  await shot(one.page, "9-name-friend");
 
   relay.stop();
 } finally {

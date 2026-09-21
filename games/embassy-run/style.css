@@ -187,6 +187,100 @@
 .er-hud-top .er-icon { min-height: 2.2em; min-width: 2.2em; padding: 0 0.5em; }
 .er-item-on { background: var(--signal); color: var(--ink); }
 
+/* ---- Embassy plan -------------------------------------------------------------------- */
+
+.er-minimap {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+  width: 3.4em; height: 3.4em; padding: 2px;
+  border: 2px solid var(--ink); border-radius: 5px; background: var(--paper-dim);
+  flex: 0 0 auto;
+}
+.er-cell {
+  display: grid; place-items: center; background: #fff; border-radius: 1px;
+  font-size: 0.5em; line-height: 1; color: var(--muted);
+}
+.er-cell-seen { background: var(--paper-dim); }
+.er-cell-gate { color: var(--ink); font-weight: 700; }
+.er-cell-here { background: var(--signal); box-shadow: inset 0 0 0 1px var(--ink); }
+
+/* ---- Mission track, health and power-up badges -------------------------------------- */
+
+.er-glyph { display: block; image-rendering: auto; }
+
+.er-track { display: flex; align-items: center; gap: 0.3em; }
+.er-track-slot {
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+  width: 2.1em; padding: 0.15em 0; border: 2px solid var(--ink); border-radius: 5px;
+  background: var(--paper-dim); opacity: 0.55;
+}
+.er-track-slot small { font-size: 0.6em; line-height: 1; color: var(--muted); }
+.er-track-held { background: var(--signal); opacity: 1; }
+.er-track-held small { color: var(--ink); font-weight: 700; }
+.er-track-count { font-size: 0.8em; font-weight: 700; margin-left: 0.15em; font-variant-numeric: tabular-nums; }
+
+.er-health { display: flex; align-items: center; gap: 0.35em; }
+.er-health-bar {
+  display: block; width: 4.6em; height: 0.85em; border: 2px solid var(--ink);
+  border-radius: 999px; background: var(--paper-dim); overflow: hidden;
+}
+.er-health-fill { display: block; height: 100%; background: var(--signal); transition: width 140ms linear, background 200ms linear; }
+.er-health-low .er-health-fill { background: #e8c547; }
+.er-health-critical .er-health-fill { background: var(--alert); }
+.er-health small { font-size: 0.75em; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.er-kitbadges { display: flex; gap: 0.2em; }
+.er-kitbadge {
+  display: grid; place-items: center; width: 1.6em; height: 1.6em;
+  border: 2px solid var(--ink); border-radius: 5px; background: var(--paper);
+}
+
+/* ---- Centre-screen pickup flashes ---------------------------------------------------- */
+
+.er-flashes {
+  position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; gap: 0.5em; align-items: center;
+  pointer-events: none; z-index: 5;
+}
+.er-flash {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1em;
+  padding: 0.6em 1.1em; border: 3px solid var(--ink); border-radius: 10px;
+  background: var(--signal); color: var(--ink); text-align: center;
+  box-shadow: 0 6px 0 rgba(20, 24, 15, 0.35);
+  animation: er-flash-in 220ms ease-out;
+}
+.er-flash-bad { background: var(--alert); color: var(--paper); border-color: var(--ink); }
+.er-flash-bad .er-glyph { filter: invert(1); }
+.er-flash strong { font-size: 1.05em; letter-spacing: 0.04em; }
+.er-flash span { font-size: 0.78em; opacity: 0.85; }
+@keyframes er-flash-in {
+  from { transform: scale(0.82) translateY(8px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* ---- Career standings ---------------------------------------------------------------- */
+
+.er-board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.er-board li {
+  display: grid; grid-template-columns: 2em 1fr auto; gap: 0.7em; align-items: center;
+  padding: 0.5em 0.7em; border: 2px solid var(--ink); border-radius: 7px; background: #fff;
+}
+.er-board li.er-me { border-color: var(--signal); box-shadow: inset 0 0 0 2px var(--signal); }
+.er-board-rank { font-weight: 700; font-size: 1.1em; text-align: center; color: var(--muted); }
+.er-board-name { display: flex; flex-direction: column; min-width: 0; }
+.er-board-name strong { font-size: 0.9em; }
+.er-board-name small, .er-board-stats small { font-size: 0.7em; color: var(--muted); }
+.er-board-stats { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.er-board-stats strong { font-size: 1.05em; }
+
+.er-score-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Escape sequence ------------------------------------------------------------------ */
+
+.er-escape { position: relative; flex: 1 1 auto; min-height: 0; display: grid; place-items: center; background: var(--void); }
+.er-skip {
+  position: absolute; right: 1em; bottom: max(42px, 9cqh); z-index: 3;
+}
+
 .er-stage { position: relative; flex: 1 1 auto; min-height: 0; display: grid; place-items: center; background: var(--void); }
 .er-canvas {
   /* Exactly 3:2, so the 960x640 bitmap fills the element box and a tap maps straight to a
@@ -325,4 +419,6 @@
 @media (prefers-reduced-motion: reduce) {
   .er-shell button { transition: none; }
   .er-stick-knob { transition: none !important; }
+  .er-flash { animation: none; }
+  .er-health-fill { transition: none; }
 }

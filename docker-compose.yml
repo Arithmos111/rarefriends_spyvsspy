@@ -17,6 +17,10 @@ services:
       PORT: "8080"
       # Optional. Leave unset to run with the Genesis perk switched off.
       RF_GENESIS_ADDRESS: ${RF_GENESIS_ADDRESS:-}
+      # Career standings live here. Keep the volume below or they reset on every redeploy.
+      RF_DATA_DIR: /data
+    volumes:
+      - embassy_data:/data
     # Reachable only from the proxy, never published straight to the internet.
     expose:
       - "8080"
@@ -45,6 +49,8 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  # The leaderboard's JSON file. Losing this volume wipes every career total.
+  embassy_data:
 
 networks:
   embassy:

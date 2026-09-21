@@ -44,7 +44,12 @@ COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/server ./server
 COPY --from=build /app/games ./games
 
-# Run unprivileged; the image needs no write access at runtime.
+# Career standings are written here; the compose file mounts a volume over it.
+ENV RF_DATA_DIR=/data
+RUN mkdir -p /data && chown -R node:node /data
+VOLUME ["/data"]
+
+# Run unprivileged. /data is the only path it writes.
 USER node
 EXPOSE 8080
 

@@ -8,11 +8,14 @@
  */
 import {
   ATTACK_COOLDOWN_MS, ATTACK_RANGE, ATTACK_WINDUP_MS, BUCKET_STUN_MS, DISARM_MS,
-  DOOR_HALF_WIDTH, HIT_STUN_MS, INTERACT_RANGE, MATCH_SECONDS, MAX_STEP_MS, MISSION_ITEMS,
-  MISSION_ITEM_LABELS, PLANT_MS, PLAYER_MAX_HP, PLAYER_RADIUS, PLAYER_SPEED, RESPAWN_MS,
-  ROOM_H, ROOM_W, SEARCH_MS, SEARCH_MS_LOCKPICK, SPAWN_INVULNERABLE_MS, TRAP_IS_LETHAL,
-  TRAP_LABELS, TRAP_TYPES, neighbourRoom,
-  type Direction, type MatchEvent, type MissionItem, type PlayerAction, type TrapType,
+  DOOR_HALF_WIDTH, FIST_DAMAGE, HIT_STUN_MS, INTERACT_RANGE, KNIFE_DAMAGE, MATCH_SECONDS,
+  MAX_STEP_MS, MEDKIT_HEAL, MISSION_ITEMS, PLANT_MS, PLAYER_HP_CEILING, PLAYER_MAX_HP,
+  PLAYER_RADIUS, PLAYER_SPEED, RESPAWN_MS, ROOM_H, ROOM_W, SCORE_ESCAPE, SCORE_PER_ITEM,
+  SCORE_PER_TAKEDOWN, SCORE_SURVIVED, SCORE_TIME_WIN, SEARCH_MS, SEARCH_MS_LOCKPICK,
+  SPAWN_INVULNERABLE_MS, TRAP_IS_LETHAL, TRAP_LABELS, TRAP_TYPES, VEST_BONUS_HP,
+  carryableLabel, doorTrapDirection, doorTrapId, isDoorTrapId, isPowerUp, neighbourRoom,
+  type Carryable, type Direction, type MatchCue, type MatchEvent, type MissionItem,
+  type PlayerAction, type PowerUp, type TrapType,
 } from "./protocol.ts";
 import {
   EXIT_RADIUS, EXIT_X, EXIT_Y, blockedByFurniture, createMap, doorEntryPoint, findFurniture,
@@ -24,20 +27,25 @@ export type Facing = "up" | "down" | "left" | "right";
 
 export type SimPlayer = {
   playerId: string; friendId: string; codename: string; genesis: boolean; seat: number;
+  friendName: string | null;
   room: number; x: number; y: number; facing: Facing; walking: boolean;
-  hp: number; deaths: number; connected: boolean;
+  hp: number; maxHp: number; deaths: number; takedowns: number; connected: boolean;
   stunnedUntil: number; attackReadyAt: number; attackingUntil: number;
   invulnerableUntil: number; respawnAt: number;
-  inventory: MissionItem[]; traps: Record<TrapType, number>;
-  detector: boolean; lockpick: boolean; disarm: boolean;
-  busy: { kind: "search" | "plant" | "disarm"; furnitureId: number; startedAt: number; endsAt: number; trap?: TrapType } | null;
+  inventory: MissionItem[]; powerUps: PowerUp[]; traps: Record<TrapType, number>;
+  detector: boolean; lockpick: boolean; disarm: boolean; knife: boolean;
+  busy: { kind: "search" | "plant" | "disarm"; targetId: number; startedAt: number; endsAt: number; trap?: TrapType } | null;
   input: { dx: number; dy: number }; lastSeq: number;
+  /** Doorway trap this agent has already been moved through, so it fires once per crossing. */
+  itemsFound: number;
 };
 
-export type SimTrap = { furnitureId: number; type: TrapType; ownerId: string };
-export type SimDrop = { id: number; item: MissionItem; room: number; x: number; y: number };
+/** A trap on furniture or on a doorway; targetId distinguishes them. */
+export type SimTrap = { targetId: number; type: TrapType; ownerId: string };
+export type SimDrop = { id: number; item: Carryable; room: number; x: number; y: number };
 
 export type SimEvent = MatchEvent & { to?: string };
+export type SimCue = MatchCue & { to: string };
 
 export type MatchSim = {
   seed: number; map: EmbassyMap;
@@ -46,7 +54,10 @@ export type MatchSim = {
   drops: SimDrop[]; nextDropId: number;
   now: number; endsAt: number; tick: number;
   finished: boolean; winner: string | null; endReason: string;
+  /** True when the winner reached the gate, which plays the escape sequence. */
+  escaped: boolean;
   events: SimEvent[];
+  cues: SimCue[];
 };
 
 const clamp = (value: number, low: number, high: number) => value < low ? low : value > high ? high : value;
@@ -54,7 +65,10 @@ const distance = (ax: number, ay: number, bx: number, by: number) => Math.hypot(
 
 export function createMatch(
   seed: number,
-  roster: readonly Readonly<{ playerId: string; friendId: string; codename: string; genesis: boolean; kitId: string }>[],
+  roster: readonly Readonly<{
+    playerId: string; friendId: string; codename: string; genesis: boolean; kitId: string;
+    friendName?: string | null;
+  }>[],
   now: number,
 ): MatchSim {
   const map = createMap(seed);
@@ -64,21 +78,21 @@ export function createMatch(
     const spawn = spawnPointFor(seat);
     players.set(entry.playerId, {
       playerId: entry.playerId, friendId: entry.friendId, codename: entry.codename,
-      genesis: entry.genesis, seat,
+      genesis: entry.genesis, seat, friendName: entry.friendName ?? null,
       room: spawn.room, x: spawn.x, y: spawn.y, facing: "down", walking: false,
-      hp: PLAYER_MAX_HP, deaths: 0, connected: true,
+      hp: PLAYER_MAX_HP, maxHp: PLAYER_MAX_HP, deaths: 0, takedowns: 0, connected: true,
       stunnedUntil: 0, attackReadyAt: 0, attackingUntil: 0,
       invulnerableUntil: now + SPAWN_INVULNERABLE_MS, respawnAt: 0,
-      inventory: [], traps: resolveTraps(entry.kitId, entry.genesis),
+      inventory: [], powerUps: [], traps: resolveTraps(entry.kitId, entry.genesis),
       detector: kitFlag(entry.kitId, "detector"), lockpick: kitFlag(entry.kitId, "lockpick"),
-      disarm: kitFlag(entry.kitId, "disarm"),
-      busy: null, input: { dx: 0, dy: 0 }, lastSeq: 0,
+      disarm: kitFlag(entry.kitId, "disarm"), knife: false,
+      busy: null, input: { dx: 0, dy: 0 }, lastSeq: 0, itemsFound: 0,
     });
   });
   return {
     seed, map, players, traps: new Map(), drops: [], nextDropId: 1,
     now, endsAt: now + MATCH_SECONDS * 1000, tick: 0,
-    finished: false, winner: null, endReason: "", events: [],
+    finished: false, winner: null, endReason: "", escaped: false, events: [], cues: [],
   };
 }
 
@@ -91,8 +105,37 @@ function emit(sim: MatchSim, text: string, tone: MatchEvent["tone"], to?: string
   if (sim.events.length > 200) sim.events.splice(0, sim.events.length - 200);
 }
 
+/** A one-shot presentation cue for a single player, such as the centre-screen pickup flash. */
+function cue(sim: MatchSim, to: string, value: MatchCue) {
+  sim.cues.push({ ...value, to });
+  if (sim.cues.length > 120) sim.cues.splice(0, sim.cues.length - 120);
+}
+
+export function attackDamage(player: SimPlayer): number {
+  return player.knife ? KNIFE_DAMAGE : FIST_DAMAGE;
+}
+
+/** Match points, recomputed from the running tallies rather than accumulated. */
+export function scoreOf(sim: MatchSim, player: SimPlayer): number {
+  let points = player.itemsFound * SCORE_PER_ITEM + player.takedowns * SCORE_PER_TAKEDOWN;
+  if (sim.finished && sim.winner === player.playerId) points += sim.escaped ? SCORE_ESCAPE : SCORE_TIME_WIN;
+  if (sim.finished && player.hp > 0 && player.respawnAt === 0) points += SCORE_SURVIVED;
+  return points;
+}
+
 export function isActive(player: SimPlayer, now: number): boolean {
   return player.hp > 0 && player.respawnAt === 0 && player.stunnedUntil <= now;
+}
+
+/**
+ * Set by movePlayer when a doorway is crossed, so the server can spring a door trap. The
+ * client runs the same movement code for prediction and simply ignores this.
+ */
+let lastCrossing: { from: number; direction: Direction } | null = null;
+export function takeLastCrossing() {
+  const value = lastCrossing;
+  lastCrossing = null;
+  return value;
 }
 
 /** Movement, door transitions and collision. Shared verbatim with the client's prediction. */
@@ -100,6 +143,7 @@ export function movePlayer(
   map: EmbassyMap, player: Pick<SimPlayer, "room" | "x" | "y" | "facing" | "walking">,
   dx: number, dy: number, deltaMs: number,
 ): void {
+  lastCrossing = null;
   player.walking = false;
   const magnitude = Math.hypot(dx, dy);
   if (magnitude < 0.01) return;
@@ -117,6 +161,7 @@ export function movePlayer(
     const next = neighbourRoom(player.room, crossing);
     if (next !== null) {
       const entry = doorEntryPoint(crossing);
+      lastCrossing = { from: player.room, direction: crossing };
       player.room = next;
       player.x = entry.x;
       player.y = entry.y;
@@ -163,7 +208,17 @@ export function stepMatch(sim: MatchSim, deltaMs: number): void {
     }
     const before = player.room;
     movePlayer(sim.map, player, player.input.dx, player.input.dy, deltaMs);
-    if (player.room !== before) cancelBusy(player);
+    if (player.room !== before) {
+      cancelBusy(player);
+      const crossing = takeLastCrossing();
+      if (crossing) {
+        const trap = sim.traps.get(doorTrapId(crossing.from, crossing.direction));
+        if (trap) {
+          sim.traps.delete(trap.targetId);
+          triggerTrap(sim, player, trap);
+        }
+      }
+    }
   }
 
   if (!sim.finished && sim.now >= sim.endsAt) finishOnTime(sim);
@@ -172,7 +227,7 @@ export function stepMatch(sim: MatchSim, deltaMs: number): void {
 function respawn(sim: MatchSim, player: SimPlayer): void {
   const spawn = spawnPointFor(player.seat);
   player.room = spawn.room; player.x = spawn.x; player.y = spawn.y;
-  player.hp = PLAYER_MAX_HP; player.respawnAt = 0; player.stunnedUntil = 0;
+  player.hp = player.maxHp; player.respawnAt = 0; player.stunnedUntil = 0;
   player.invulnerableUntil = sim.now + SPAWN_INVULNERABLE_MS;
   player.busy = null; player.walking = false; player.input = { dx: 0, dy: 0 };
 }
@@ -198,8 +253,8 @@ export function applyAction(sim: MatchSim, playerId: string, action: PlayerActio
 
   switch (action.kind) {
     case "search": return beginSearch(sim, player, action.furnitureId);
-    case "plant": return beginPlant(sim, player, action.furnitureId, action.trap);
-    case "disarm": return beginDisarm(sim, player, action.furnitureId);
+    case "plant": return beginPlant(sim, player, action.targetId, action.trap);
+    case "disarm": return beginDisarm(sim, player, action.targetId);
     case "pickup": return pickUp(sim, player, action.dropId);
     case "attack": return attack(sim, player);
     case "escape": return tryEscape(sim, player);
@@ -214,62 +269,89 @@ function furnitureInReach(sim: MatchSim, player: SimPlayer, furnitureId: number)
   return piece;
 }
 
+/** Where a doorway sits in its own room's coordinates, for reach checks and drawing. */
+export function doorAnchor(direction: Direction): { x: number; y: number } {
+  if (direction === "north") return { x: ROOM_W / 2, y: 0 };
+  if (direction === "south") return { x: ROOM_W / 2, y: ROOM_H };
+  if (direction === "west") return { x: 0, y: ROOM_H / 2 };
+  return { x: ROOM_W, y: ROOM_H / 2 };
+}
+
+/** True when the agent is standing close enough to a trap target, furniture or doorway. */
+function targetInReach(sim: MatchSim, player: SimPlayer, targetId: number): boolean {
+  if (Math.floor(targetId / 100) !== player.room) return false;
+  if (isDoorTrapId(targetId)) {
+    const direction = doorTrapDirection(targetId);
+    if (!sim.map.rooms[player.room].doors.includes(direction)) return false;
+    const anchor = doorAnchor(direction);
+    return distance(player.x, player.y, anchor.x, anchor.y) <= INTERACT_RANGE;
+  }
+  return furnitureInReach(sim, player, targetId) !== null;
+}
+
+function targetLabel(targetId: number): string {
+  return isDoorTrapId(targetId) ? `${doorTrapDirection(targetId)} doorway` : "furniture";
+}
+
 function beginSearch(sim: MatchSim, player: SimPlayer, furnitureId: number): void {
   if (player.busy) return;
   const piece = furnitureInReach(sim, player, furnitureId);
   if (!piece) return;
   const duration = player.lockpick ? SEARCH_MS_LOCKPICK : SEARCH_MS;
-  player.busy = { kind: "search", furnitureId, startedAt: sim.now, endsAt: sim.now + duration };
+  player.busy = { kind: "search", targetId: furnitureId, startedAt: sim.now, endsAt: sim.now + duration };
 }
 
-function beginPlant(sim: MatchSim, player: SimPlayer, furnitureId: number, trap: TrapType): void {
+function beginPlant(sim: MatchSim, player: SimPlayer, targetId: number, trap: TrapType): void {
   if (player.busy || !TRAP_TYPES.includes(trap)) return;
   if ((player.traps[trap] ?? 0) <= 0) return;
-  const piece = furnitureInReach(sim, player, furnitureId);
-  if (!piece || sim.traps.has(furnitureId)) return;
-  player.busy = { kind: "plant", furnitureId, startedAt: sim.now, endsAt: sim.now + PLANT_MS, trap };
+  if (!targetInReach(sim, player, targetId) || sim.traps.has(targetId)) return;
+  player.busy = { kind: "plant", targetId, startedAt: sim.now, endsAt: sim.now + PLANT_MS, trap };
 }
 
-function beginDisarm(sim: MatchSim, player: SimPlayer, furnitureId: number): void {
+/** Your own traps can be disarmed too, since they are now just as dangerous to you. */
+function beginDisarm(sim: MatchSim, player: SimPlayer, targetId: number): void {
   if (player.busy || !player.disarm) return;
-  const piece = furnitureInReach(sim, player, furnitureId);
-  if (!piece) return;
-  const trap = sim.traps.get(furnitureId);
-  if (!trap || trap.ownerId === player.playerId) return;
-  player.busy = { kind: "disarm", furnitureId, startedAt: sim.now, endsAt: sim.now + DISARM_MS };
+  if (!targetInReach(sim, player, targetId)) return;
+  if (!sim.traps.has(targetId)) return;
+  player.busy = { kind: "disarm", targetId, startedAt: sim.now, endsAt: sim.now + DISARM_MS };
 }
 
 function completeBusy(sim: MatchSim, player: SimPlayer): void {
   const busy = player.busy;
   player.busy = null;
   if (!busy) return;
-  const piece = findFurniture(sim.map, busy.furnitureId);
-  if (!piece) return;
 
   if (busy.kind === "plant") {
     const trap = busy.trap!;
-    if ((player.traps[trap] ?? 0) <= 0 || sim.traps.has(busy.furnitureId)) return;
+    if ((player.traps[trap] ?? 0) <= 0 || sim.traps.has(busy.targetId)) return;
     player.traps[trap]--;
-    sim.traps.set(busy.furnitureId, { furnitureId: busy.furnitureId, type: trap, ownerId: player.playerId });
-    emit(sim, `${TRAP_LABELS[trap]} set in the ${sim.map.rooms[player.room].name}.`, "good", player.playerId);
+    sim.traps.set(busy.targetId, { targetId: busy.targetId, type: trap, ownerId: player.playerId });
+    emit(sim, `${TRAP_LABELS[trap]} set on the ${targetLabel(busy.targetId)} in the ${sim.map.rooms[player.room].name}. Mind it yourself.`, "good", player.playerId);
     return;
   }
 
   if (busy.kind === "disarm") {
-    const trap = sim.traps.get(busy.furnitureId);
-    if (!trap || trap.ownerId === player.playerId) return;
-    sim.traps.delete(busy.furnitureId);
+    const trap = sim.traps.get(busy.targetId);
+    if (!trap) return;
+    sim.traps.delete(busy.targetId);
     player.traps[trap.type] = (player.traps[trap.type] ?? 0) + 1;
-    emit(sim, `You disarmed a ${TRAP_LABELS[trap.type].toLowerCase()} and kept it.`, "good", player.playerId);
-    const owner = sim.players.get(trap.ownerId);
-    if (owner) emit(sim, `${player.codename} disarmed your ${TRAP_LABELS[trap.type].toLowerCase()}.`, "bad", owner.playerId);
+    const own = trap.ownerId === player.playerId;
+    emit(sim, own
+      ? `You recovered your own ${TRAP_LABELS[trap.type].toLowerCase()}.`
+      : `You disarmed a ${TRAP_LABELS[trap.type].toLowerCase()} and kept it.`, "good", player.playerId);
+    if (!own) {
+      const owner = sim.players.get(trap.ownerId);
+      if (owner) emit(sim, `${player.codename} disarmed your ${TRAP_LABELS[trap.type].toLowerCase()}.`, "bad", owner.playerId);
+    }
     return;
   }
 
-  // Search. A rival's trap fires before anything is found.
-  const trap = sim.traps.get(busy.furnitureId);
-  if (trap && trap.ownerId !== player.playerId) {
-    sim.traps.delete(busy.furnitureId);
+  // Search. Any armed trap fires first, including one you set yourself.
+  const piece = findFurniture(sim.map, busy.targetId);
+  if (!piece) return;
+  const trap = sim.traps.get(busy.targetId);
+  if (trap) {
+    sim.traps.delete(busy.targetId);
     triggerTrap(sim, player, trap);
     return;
   }
@@ -278,28 +360,66 @@ function completeBusy(sim: MatchSim, player: SimPlayer): void {
     const item = piece.contents;
     piece.contents = null;
     piece.emptied = true;
-    player.inventory.push(item);
-    emit(sim, `${player.codename} recovered the ${MISSION_ITEM_LABELS[item].toLowerCase()}.`, "alert");
-    emit(sim, `You found the ${MISSION_ITEM_LABELS[item].toLowerCase()}.`, "good", player.playerId);
+    collect(sim, player, item);
   } else {
     piece.emptied = true;
     emit(sim, "Nothing hidden here.", "info", player.playerId);
   }
 }
 
+/** Take an item into inventory, or apply it immediately if it is a consumable power-up. */
+function collect(sim: MatchSim, player: SimPlayer, item: Carryable): void {
+  cue(sim, player.playerId, { kind: "pickup", item });
+  if (!isPowerUp(item)) {
+    player.inventory.push(item);
+    player.itemsFound++;
+    emit(sim, `${player.codename} recovered the ${carryableLabel(item).toLowerCase()}.`, "alert");
+    emit(sim, `You found the ${carryableLabel(item).toLowerCase()}. ${MISSION_ITEMS.length - player.inventory.length} to go.`, "good", player.playerId);
+    return;
+  }
+  if (item === "medkit") {
+    const healed = Math.min(MEDKIT_HEAL, player.maxHp - player.hp);
+    player.hp += healed;
+    if (healed > 0) cue(sim, player.playerId, { kind: "heal", amount: healed });
+    emit(sim, healed > 0 ? `Field medkit: +${healed} health.` : "Field medkit found, but you are unhurt.", "good", player.playerId);
+    if (healed === 0) player.powerUps.push(item);
+    return;
+  }
+  if (item === "vest") {
+    player.maxHp = Math.min(PLAYER_HP_CEILING, player.maxHp + VEST_BONUS_HP);
+    player.hp = Math.min(player.maxHp, player.hp + VEST_BONUS_HP);
+    player.powerUps.push(item);
+    cue(sim, player.playerId, { kind: "heal", amount: VEST_BONUS_HP });
+    emit(sim, `Ballistic vest: maximum health is now ${player.maxHp}.`, "good", player.playerId);
+    return;
+  }
+  player.knife = true;
+  player.powerUps.push(item);
+  emit(sim, "You found the stiletto. Your strikes now hit for 2.", "good", player.playerId);
+  emit(sim, `${player.codename} picked up the stiletto knife.`, "alert");
+}
+
 function triggerTrap(sim: MatchSim, victim: SimPlayer, trap: SimTrap): void {
   const owner = sim.players.get(trap.ownerId);
+  const ownGoal = trap.ownerId === victim.playerId;
   const label = TRAP_LABELS[trap.type].toLowerCase();
+  cue(sim, victim.playerId, { kind: "trap", trap: trap.type });
   if (TRAP_IS_LETHAL[trap.type]) {
-    emit(sim, `${victim.codename} set off a ${label}.`, "alert");
-    if (owner) emit(sim, `Your ${label} caught ${victim.codename}.`, "good", owner.playerId);
-    kill(sim, victim, `a ${label}`);
+    emit(sim, ownGoal
+      ? `${victim.codename} was caught by their own ${label}.`
+      : `${victim.codename} set off a ${label}.`, "alert");
+    if (owner && !ownGoal) emit(sim, `Your ${label} caught ${victim.codename}.`, "good", owner.playerId);
+    // A trap an agent set themselves is nobody's takedown.
+    if (owner && !ownGoal) owner.takedowns++;
+    kill(sim, victim, ownGoal ? `their own ${label}` : `a ${label}`);
     return;
   }
   victim.stunnedUntil = sim.now + BUCKET_STUN_MS;
   victim.busy = null;
-  emit(sim, `A ${label} soaked you. You cannot move for a moment.`, "bad", victim.playerId);
-  if (owner) emit(sim, `Your ${label} slowed ${victim.codename} down.`, "good", owner.playerId);
+  emit(sim, ownGoal
+    ? `Your own ${label} soaked you. You cannot move for a moment.`
+    : `A ${label} soaked you. You cannot move for a moment.`, "bad", victim.playerId);
+  if (owner && !ownGoal) emit(sim, `Your ${label} slowed ${victim.codename} down.`, "good", owner.playerId);
 }
 
 function attack(sim: MatchSim, player: SimPlayer): void {
@@ -315,20 +435,30 @@ function attack(sim: MatchSim, player: SimPlayer): void {
     if (gap <= bestDistance) { best = other; bestDistance = gap; }
   }
   if (!best) return;
-  best.hp -= 1;
+  const damage = attackDamage(player);
+  best.hp -= damage;
   best.busy = null;
   best.stunnedUntil = sim.now + HIT_STUN_MS;
+  cue(sim, best.playerId, { kind: "hurt", amount: damage });
   if (best.hp <= 0) {
-    emit(sim, `${player.codename} took down ${best.codename}.`, "alert");
-    kill(sim, best, `${player.codename}`);
+    player.takedowns++;
+    cue(sim, player.playerId, { kind: "takedown" });
+    emit(sim, `${player.codename} took down ${best.codename}${player.knife ? " with the stiletto" : ""}.`, "alert");
+    kill(sim, best, player.codename);
   } else {
-    emit(sim, `${player.codename} struck you.`, "bad", best.playerId);
-    emit(sim, `You struck ${best.codename}.`, "good", player.playerId);
+    emit(sim, `${player.codename} struck you for ${damage}. ${best.hp} health left.`, "bad", best.playerId);
+    emit(sim, `You struck ${best.codename} for ${damage}. ${best.hp} left.`, "good", player.playerId);
   }
 }
 
 function kill(sim: MatchSim, victim: SimPlayer, cause: string): void {
-  const dropped = victim.inventory.splice(0, victim.inventory.length);
+  const dropped: Carryable[] = victim.inventory.splice(0, victim.inventory.length);
+  victim.itemsFound = Math.max(0, victim.itemsFound - dropped.length);
+  if (victim.knife) {
+    victim.knife = false;
+    victim.powerUps = victim.powerUps.filter(entry => entry !== "knife");
+    dropped.push("knife");
+  }
   dropped.forEach((item, index) => {
     const angle = (index / Math.max(1, dropped.length)) * Math.PI * 2;
     sim.drops.push({
@@ -343,6 +473,7 @@ function kill(sim: MatchSim, victim: SimPlayer, cause: string): void {
   victim.walking = false;
   victim.input = { dx: 0, dy: 0 };
   victim.respawnAt = sim.now + RESPAWN_MS;
+  cue(sim, victim.playerId, { kind: "downed" });
   emit(sim, `You were taken out by ${cause}.${dropped.length ? " You dropped everything you carried." : ""}`, "bad", victim.playerId);
 }
 
@@ -353,8 +484,7 @@ function pickUp(sim: MatchSim, player: SimPlayer, dropId: number): void {
   if (drop.room !== player.room) return;
   if (distance(player.x, player.y, drop.x, drop.y) > INTERACT_RANGE) return;
   sim.drops.splice(index, 1);
-  player.inventory.push(drop.item);
-  emit(sim, `You picked up the ${MISSION_ITEM_LABELS[drop.item].toLowerCase()}.`, "good", player.playerId);
+  collect(sim, player, drop.item);
 }
 
 function tryEscape(sim: MatchSim, player: SimPlayer): void {
@@ -366,6 +496,7 @@ function tryEscape(sim: MatchSim, player: SimPlayer): void {
   }
   sim.finished = true;
   sim.winner = player.playerId;
+  sim.escaped = true;
   sim.endReason = `${player.codename} escaped through the courtyard gate with the full set.`;
   emit(sim, sim.endReason, "alert");
 }
@@ -382,6 +513,7 @@ function finishOnTime(sim: MatchSim): void {
   const tied = ranked.filter(player => player.inventory.length === top?.inventory.length && player.deaths === top?.deaths);
   if (top && top.inventory.length > 0 && tied.length === 1) {
     sim.winner = top.playerId;
+    sim.escaped = false;
     sim.endReason = `Time expired. ${top.codename} held the most intelligence.`;
   } else {
     sim.winner = null;

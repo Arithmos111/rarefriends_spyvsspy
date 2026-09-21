@@ -20,12 +20,18 @@ import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "
 // game directory may not bundle anything from the SDK's assets/ folder.
 
 import { createNet, type Net, type NetStatus } from "./net.ts";
-import { drawEmbassy, unproject, VIEW_H, VIEW_W } from "./render.ts";
 import {
-  INPUT_MS, INTERACT_RANGE, MATCH_SECONDS, MISSION_ITEMS, MISSION_ITEM_LABELS, ROOM_H, ROOM_W,
-  TRAP_LABELS, TRAP_TYPES,
-  type LobbyMember, type LobbySummary, type MatchEvent, type MatchSnapshot,
-  type PublicPlayer, type ServerMessage, type TrapType,
+  drawCarryableGlyph, drawEmbassy, drawEscapeScene, doorAnchorWorld, ESCAPE_DURATION_MS,
+  unproject, VIEW_H, VIEW_W,
+} from "./render.ts";
+import { createAudio, type Audio, type SoundCue } from "./audio.ts";
+import {
+  DIRECTIONS, INPUT_MS, INTERACT_RANGE, MATCH_SECONDS, MAX_FRIEND_NAME, MISSION_ITEMS,
+  MISSION_ITEM_LABELS, POWER_UP_BLURBS, POWER_UP_LABELS, ROOM_H, ROOM_W, TRAP_LABELS,
+  TRAP_TYPES, carryableLabel, displayName, doorTrapId, isDoorTrapId, normaliseFriendName,
+  type Carryable, type Direction, type LeaderboardRow, type LobbyMember, type LobbySummary,
+  type MatchCue, type MatchEvent, type MatchSnapshot, type PowerUp, type PublicPlayer,
+  type ServerMessage, type TrapType,
 } from "./shared/protocol.ts";
 import {
   EXIT_RADIUS, EXIT_X, EXIT_Y, blockedByFurniture, createMap, insideRoom,
@@ -35,8 +41,13 @@ import { KITS, FIELD_KIT_ID, kitById } from "./shared/loadouts.ts";
 import { movePlayer, type Facing } from "./shared/sim.ts";
 import "./style.css";
 
-type Screen = "briefing" | "lobby" | "match" | "results";
-type Menu = "crate" | "kits" | "settings" | "join" | "create" | "reveal" | "traps" | null;
+type Screen = "briefing" | "lobby" | "match" | "escape" | "results";
+type Menu = "crate" | "kits" | "settings" | "join" | "create" | "reveal" | "traps"
+  | "leaderboard" | "codename" | null;
+
+/** A centre-screen flash when something is picked up or goes wrong. */
+type Flash = { id: number; item: Carryable | null; title: string; detail: string; tone: "good" | "bad"; at: number };
+const FLASH_MS = 1600;
 
 const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
 const distance = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
@@ -99,12 +110,21 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const [lobbyName, setLobbyName] = useState("");
   const [privateLobby, setPrivateLobby] = useState(false);
   const [spriteTick, setSpriteTick] = useState(0);
+  const [musicOn, setMusicOn] = useState(true);
+  const [flashes, setFlashes] = useState<readonly Flash[]>([]);
+  const [leaderboard, setLeaderboard] = useState<readonly LeaderboardRow[]>([]);
+  const [friendName, setFriendName] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [escape, setEscape] = useState<{ startedAt: number; won: boolean; codename: string; friendName: string | null } | null>(null);
+  const [visitedRooms, setVisitedRooms] = useState<ReadonlySet<number>>(() => new Set<number>());
   const [artworkFailed, setArtworkFailed] = useState(0);
   const [enteringMatch, setEnteringMatch] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const netRef = useRef<Net | null>(null);
   const soundRef = useRef<FriendSoundKit | null>(null);
+  const audioRef = useRef<Audio | null>(null);
+  const flashSeq = useRef(1);
   const spritesRef = useRef(new Map<string, any>());
   const readerRef = useRef<ReturnType<typeof createFriendReader> | null>(null);
   const mapRef = useRef<EmbassyMap | null>(null);
@@ -125,7 +145,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   menuRef.current = menu;
   reducedRef.current = reducedMotion;
 
-  const screen: Screen = results ? "results" : match ? "match" : lobby ? "lobby" : "briefing";
+  const screen: Screen = escape ? "escape" : results ? "results" : match ? "match" : lobby ? "lobby" : "briefing";
   screenRef.current = screen;
 
   const inputBlocked = paused || menu !== null;
@@ -143,6 +163,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
 
   useEffect(() => {
     soundRef.current = createFriendSoundKit({ muted: true });
+    audioRef.current = createAudio();
+    audioRef.current.setMuted(true);
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
     const sync = () => setReducedMotion(preference.matches);
     sync();
@@ -152,8 +174,56 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       preference.removeEventListener("change", sync);
       soundRef.current?.dispose();
       soundRef.current = null;
+      audioRef.current?.dispose();
+      audioRef.current = null;
     };
   }, [refreshEconomy]);
+
+  /** Music plays during a match and the escape, and stops everywhere else. */
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!muted && musicOn && (screen === "match" || screen === "escape")) audio.startMusic();
+    else audio.stopMusic();
+  }, [muted, musicOn, screen]);
+
+  const pushFlash = useCallback((flash: Omit<Flash, "id" | "at">) => {
+    const entry: Flash = { ...flash, id: flashSeq.current++, at: Date.now() };
+    setFlashes(current => [...current, entry].slice(-3));
+    setTimeout(() => setFlashes(current => current.filter(item => item.id !== entry.id)), FLASH_MS);
+  }, []);
+
+  /** Turn a server cue into a sound and, where it matters, a centre-screen flash. */
+  const handleCue = useCallback((value: MatchCue) => {
+    const audio = audioRef.current;
+    const play = (sound: SoundCue) => audio?.play(sound);
+    switch (value.kind) {
+      case "pickup": {
+        const major = MISSION_ITEMS.includes(value.item as never) || value.item === "knife";
+        play(major ? "pickup-major" : "pickup");
+        pushFlash({
+          item: value.item,
+          title: carryableLabel(value.item),
+          detail: MISSION_ITEMS.includes(value.item as never)
+            ? "Intelligence secured"
+            : POWER_UP_BLURBS[value.item as PowerUp],
+          tone: "good",
+        });
+        break;
+      }
+      case "trap":
+        play(value.trap === "bucket" ? "trap-splash" : "trap-lethal");
+        pushFlash({ item: null, title: TRAP_LABELS[value.trap], detail: "You set it off", tone: "bad" });
+        break;
+      case "hurt": play("hurt"); break;
+      case "heal": play("heal"); break;
+      case "takedown": play("takedown"); break;
+      case "downed":
+        play("downed");
+        pushFlash({ item: null, title: "Taken out", detail: "You dropped everything", tone: "bad" });
+        break;
+    }
+  }, [pushFlash]);
 
   const act = useCallback(async (work: () => Promise<void>, cue?: FriendSoundCue, message?: string) => {
     if (busy || paused) return;
@@ -191,7 +261,20 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     switch (message.t) {
       case "hello.ok":
         setIdentity({ playerId: message.playerId, codename: message.codename, genesis: message.genesis });
+        setFriendName(message.friendName);
+        setNameDraft(message.friendName ?? "");
         setRelayError("");
+        break;
+      case "leaderboard":
+        setLeaderboard(message.rows);
+        break;
+      case "friend.name":
+        setFriendName(message.friendName);
+        setNameDraft(message.friendName ?? "");
+        setNotice(message.friendName ? `Your Friend is now known as ${message.friendName}.` : "Name cleared.");
+        break;
+      case "cues":
+        for (const value of message.cues) handleCue(value);
         break;
       case "lobby.list":
         setLobbies(message.lobbies);
@@ -214,6 +297,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         mapRef.current = createMap(message.seed);
         walkToRef.current = null;
         setEnteringMatch(true);
+        setVisitedRooms(new Set<number>());
         setResults(null);
         setFeed([]);
         seqRef.current = 1;
@@ -223,6 +307,12 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         const previous = matchRef.current;
         setMatch(message);
         setEnteringMatch(false);
+        if (previous?.roomIndex !== message.roomIndex) {
+          setVisitedRooms(current => current.has(message.roomIndex)
+            ? current
+            : new Set(current).add(message.roomIndex));
+          audioRef.current?.play("door");
+        }
         const self = message.self;
         const predicted = predictedRef.current;
         if (!previous || previous.roomIndex !== message.roomIndex || predicted.room !== message.roomIndex
@@ -238,17 +328,33 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       case "events":
         setFeed(current => [...current, ...message.events].slice(-6));
         break;
-      case "match.end":
+      case "match.end": {
+        const mine = message.winner && message.winner === identityRef.current?.playerId;
         setResults({ winnerName: message.winnerName, reason: message.reason, results: message.results });
         setMatch(null);
         setEnteringMatch(false);
-        soundRef.current?.play(message.winner && message.winner === identityRef.current?.playerId ? "reward" : "reveal-common");
+        netRef.current?.send({ t: "leaderboard" });
+        // Reaching the gate earns the departure sequence; a timeout goes straight to results.
+        if (message.escaped) {
+          const winner = message.results.find(entry => entry.playerId === message.winner);
+          setEscape({
+            startedAt: performance.now(),
+            won: Boolean(mine),
+            codename: message.winnerName ?? "The agent",
+            friendName: winner?.friendName ?? null,
+          });
+          audioRef.current?.play("escape");
+        } else {
+          audioRef.current?.play(mine ? "escape" : "lose");
+        }
+        soundRef.current?.play(mine ? "reward" : "reveal-common");
         break;
+      }
       case "error":
         setRelayError(message.message);
         break;
     }
-  }, []);
+  }, [handleCue]);
 
   const identityRef = useRef(identity);
   identityRef.current = identity;
@@ -317,8 +423,12 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     atGate: boolean;
     /** Nearest furniture regardless of reach, used for the walk-to hint and checks. */
     nearest: MatchSnapshot["furniture"][number] | null;
+    /** Doorway within reach, which can be trapped just like furniture. */
+    door: Direction | null;
+    /** The trap on whatever is currently in reach, if the viewer can see it. */
+    trapHere: MatchSnapshot["traps"][number] | null;
   };
-  const emptyTargets: Targets = { furniture: null, drop: null, atGate: false, nearest: null };
+  const emptyTargets: Targets = { furniture: null, drop: null, atGate: false, nearest: null, door: null, trapHere: null };
   const targetsRef = useRef<Targets>(emptyTargets);
   const [targets, setTargets] = useState<Targets>(emptyTargets);
 
@@ -337,11 +447,29 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       const gap = distance(x, y, item.x, item.y);
       if (gap <= bestDrop) { bestDrop = gap; drop = item; }
     }
+    // A doorway is trappable from inside its own room, like a piece of furniture.
+    let door: Direction | null = null;
+    let doorGap = INTERACT_RANGE;
+    for (const direction of snapshot.doors) {
+      const anchor = doorAnchorWorld(direction);
+      const gap = distance(x, y, anchor.x, anchor.y);
+      if (gap <= doorGap) { doorGap = gap; door = direction; }
+    }
+
+    const furniture = nearestGap <= INTERACT_RANGE ? nearest : null;
+    // Prefer whichever of the two is actually closer, so a doorway beside a cabinet is not
+    // permanently shadowed by it.
+    const preferDoor = door !== null && doorGap < nearestGap;
+    const targetId = preferDoor && door
+      ? doorTrapId(snapshot.roomIndex, door)
+      : furniture?.id ?? null;
     return {
-      furniture: nearestGap <= INTERACT_RANGE ? nearest : null,
+      furniture: preferDoor ? null : furniture,
       drop,
       atGate: snapshot.exitHere && distance(x, y, EXIT_X, EXIT_Y) <= EXIT_RADIUS,
       nearest,
+      door: preferDoor ? door : null,
+      trapHere: targetId === null ? null : snapshot.traps.find(entry => entry.targetId === targetId) ?? null,
     };
   }, []);
 
@@ -358,9 +486,14 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   }, [sendAction]);
 
   const plantTrap = useCallback((trap: TrapType) => {
-    const piece = targetsRef.current.furniture;
-    if (!piece) return;
-    sendAction({ kind: "plant", furnitureId: piece.id, trap });
+    const current = targetsRef.current;
+    const snapshot = matchRef.current;
+    const targetId = current.door && snapshot
+      ? doorTrapId(snapshot.roomIndex, current.door)
+      : current.furniture?.id ?? null;
+    if (targetId === null) return;
+    sendAction({ kind: "plant", targetId, trap });
+    audioRef.current?.play("plant");
     setMenu(null);
   }, [sendAction]);
 
@@ -492,7 +625,9 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           || previousTargets.drop?.id !== next.drop?.id
           || previousTargets.atGate !== next.atGate
           || previousTargets.nearest?.id !== next.nearest?.id
-          || previousTargets.furniture?.trap !== next.furniture?.trap) {
+          || previousTargets.door !== next.door
+          || previousTargets.trapHere?.type !== next.trapHere?.type
+          || previousTargets.trapHere?.mine !== next.trapHere?.mine) {
           setTargets(next);
         }
 
@@ -510,8 +645,10 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           selfX: predictedRef.current.x,
           selfY: predictedRef.current.y,
           sprites: spritesRef.current,
+          decor: embassy.rooms[snapshot.roomIndex]?.decor ?? [],
           nearestFurnitureId: targetsRef.current.furniture?.id ?? null,
           nearestDropId: targetsRef.current.drop?.id ?? null,
+          nearestDoor: targetsRef.current.door,
           reducedMotion: reducedRef.current,
           timeMs: nowMs,
         });
@@ -646,6 +783,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       maxPrize={maxPrize} busy={busy} paused={paused} notice={notice}
       identity={identity} friendId={friendId} equippedKit={equippedKit}
       ownedKits={ownedKits} lobbies={lobbies} netStatus={netStatus}
+      friendName={friendName} leaderboard={leaderboard}
       onBuy={() => void act(() => client.buy(1n), "purchase", "One simulated Gadget Crate added.")}
       onOpen={() => void openCrate()}
       onSetMenu={setMenu} onQuick={quickMatch} onJoin={joinLobby}
@@ -663,10 +801,19 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       onCanvasPointer={onCanvasPointer} onPrimary={primaryAction}
       onAttack={() => sendAction({ kind: "attack" })}
       onTraps={() => setMenu("traps")}
-      onDisarm={() => targets.furniture && sendAction({ kind: "disarm", furnitureId: targets.furniture.id })}
+      onDisarm={() => {
+        const targetId = targets.trapHere?.targetId;
+        if (targetId !== undefined) sendAction({ kind: "disarm", targetId });
+      }}
       onSettings={() => setMenu("settings")}
       stickRef={stickRef} inputBlocked={inputBlocked} reducedMotion={reducedMotion}
       netStatus={netStatus} artworkFailed={artworkFailed} onRetryArtwork={retryArtwork}
+      flashes={flashes} visitedRooms={visitedRooms} exitRoom={mapRef.current?.exitRoom ?? 4}
+    />}
+
+    {screen === "escape" && escape && <EscapeScreen
+      escape={escape} sprites={spritesRef.current} reducedMotion={reducedMotion}
+      friendId={friendId} onDone={() => setEscape(null)}
     />}
 
     {screen === "results" && results && <ResultsScreen
@@ -677,7 +824,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     {menu && <GameMenu
       title={menu === "crate" ? "Gadget crate" : menu === "kits" ? "Your kits" : menu === "settings" ? "Settings"
         : menu === "join" ? "Join by code" : menu === "create" ? "Create a lobby"
-        : menu === "reveal" ? "Crate opened" : "Set a trap"}
+        : menu === "reveal" ? "Crate opened" : menu === "leaderboard" ? "Career standings"
+        : menu === "codename" ? "Name your Friend" : "Set a trap"}
       onClose={busy ? undefined : () => setMenu(null)}>
 
       {menu === "crate" && <div className="er-menu">
@@ -745,23 +893,88 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       </div>}
 
       {menu === "traps" && <div className="er-menu">
-        {!match ? <p>Traps can only be set during a match.</p> : !targets.furniture
-          ? <p>Stand beside a piece of furniture to set a trap in it.</p>
-          : <>
-            <p>Set a trap inside the {targets.furniture.type}. Anyone who searches it, except you, springs it.</p>
-            <div className="er-trapgrid">
-              {TRAP_TYPES.map((type, index) => {
-                const count = match.self.traps[type] ?? 0;
-                return <button key={type} type="button" className="er-trapbutton"
-                  disabled={count <= 0 || Boolean(targets.furniture?.trap)}
-                  onClick={() => plantTrap(type)}>
-                  <strong>{TRAP_LABELS[type]}</strong>
-                  <span>{count} left · key {index + 1}</span>
-                </button>;
-              })}
-            </div>
-            {targets.furniture.trap && <p className="er-fine">This furniture already holds a trap.</p>}
-          </>}
+        {!match ? <p>Traps can only be set during a match.</p>
+          : !targets.furniture && !targets.door
+            ? <p>Stand beside a piece of furniture or a doorway to set a trap.</p>
+            : <>
+              <p>
+                {targets.door
+                  ? `Rig the ${targets.door} doorway. It springs on the next agent through it.`
+                  : `Set a trap inside the ${targets.furniture!.type}. It springs on whoever searches it.`}
+              </p>
+              <p className="er-fine">
+                Your own traps are live against you as well, so remember where you left them.
+                A disarm tool recovers any trap, including your own.
+              </p>
+              <div className="er-trapgrid">
+                {TRAP_TYPES.map((type, index) => {
+                  const count = match.self.traps[type] ?? 0;
+                  return <button key={type} type="button" className="er-trapbutton"
+                    disabled={count <= 0 || Boolean(targets.trapHere)}
+                    onClick={() => plantTrap(type)}>
+                    <strong>{TRAP_LABELS[type]}</strong>
+                    <span>{count} left · key {index + 1}</span>
+                  </button>;
+                })}
+              </div>
+              {targets.trapHere && <p className="er-fine">
+                {targets.trapHere.mine ? "You already trapped this." : "This already holds a trap."}
+              </p>}
+            </>}
+      </div>}
+
+      {menu === "leaderboard" && <div className="er-menu">
+        <p className="er-fine">
+          Totals across every match this relay has hosted, kept per Rare Friend and preserved
+          across restarts. 100 points for escaping with the full set, 40 for leading on time,
+          10 per item recovered, 5 per takedown, 5 for surviving to the end.
+        </p>
+        {leaderboard.length === 0
+          ? <p className="er-empty">No matches recorded yet. Be the first.</p>
+          : <ol className="er-board">
+            {leaderboard.map((row: LeaderboardRow, index: number) => <li key={row.friendId}
+              className={row.friendId === friendId.toString() ? "er-me" : ""}>
+              <span className="er-board-rank">{index + 1}</span>
+              <span className="er-board-name">
+                <strong>{displayName(row.codename, row.friendName)}</strong>
+                <small>Friend #{row.friendId}</small>
+              </span>
+              <span className="er-board-stats">
+                <strong>{row.points}</strong>
+                <small>{row.wins}W · {row.escapes} escapes · {row.items} items · {row.takedowns} takedowns · {row.matches} played</small>
+              </span>
+            </li>)}
+          </ol>}
+      </div>}
+
+      {menu === "codename" && <div className="er-menu">
+        <p>
+          Give Friend #{friendId.toString()} a name. It shows in parentheses after your codename
+          everywhere, and travels with the Friend rather than with you.
+        </p>
+        <label className="er-field">Friend name
+          <input value={nameDraft} maxLength={MAX_FRIEND_NAME} placeholder="Nightjar"
+            onChange={event => setNameDraft(event.target.value)} />
+        </label>
+        <p className="er-fine">
+          Letters, digits, spaces, apostrophes and hyphens, up to {MAX_FRIEND_NAME} characters.
+          Preview: <strong>{displayName(identity?.codename ?? "AGENT", normaliseFriendName(nameDraft))}</strong>
+        </p>
+        <div className="er-row">
+          <button type="button" className="er-primary"
+            disabled={netStatus !== "online" || (nameDraft.trim().length > 0 && !normaliseFriendName(nameDraft))}
+            onClick={() => { send({ t: "friend.name", name: nameDraft }); setMenu(null); }}>
+            {nameDraft.trim() ? "Save name" : "Clear name"}
+          </button>
+          {friendName && <button type="button" onClick={() => { setNameDraft(""); send({ t: "friend.name", name: "" }); }}>
+            Remove
+          </button>}
+        </div>
+        <p className="er-fine">
+          The relay cannot verify that a connected player controls the Friend they claim, since
+          the sandboxed game frame has no signer. Names and standings are as trustworthy as that
+          claim, which is recorded as a capability gap in the submission.
+        </p>
       </div>}
 
       {menu === "join" && <div className="er-menu">
@@ -786,12 +999,20 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       </div>}
 
       {menu === "settings" && <div className="er-menu">
-        <button type="button" aria-pressed={!muted} onClick={() => {
-          const next = !muted;
-          setMuted(next);
-          soundRef.current?.setMuted(next);
-          if (!next) void soundRef.current?.unlock();
-        }}>{muted ? "Sound off" : "Sound on"}</button>
+        <div className="er-row">
+          <button type="button" aria-pressed={!muted} onClick={() => {
+            const next = !muted;
+            setMuted(next);
+            soundRef.current?.setMuted(next);
+            audioRef.current?.setMuted(next);
+            if (!next) { void soundRef.current?.unlock(); void audioRef.current?.unlock(); }
+          }}>{muted ? "Sound off" : "Sound on"}</button>
+          <button type="button" aria-pressed={musicOn} disabled={muted} onClick={() => {
+            const next = !musicOn;
+            setMusicOn(next);
+            audioRef.current?.setMusic(next);
+          }}>{musicOn ? "Music on" : "Music off"}</button>
+        </div>
         <label className="er-check">
           <input type="checkbox" checked={reducedMotion} onChange={event => setReducedMotion(event.target.checked)} />
           Reduce motion
@@ -813,18 +1034,67 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
 
 // ---------------------------------------------------------------------------------------
 
+/**
+ * A nine-cell plan of the embassy. Shows where you are, which rooms you have already been
+ * through, and where the courtyard gate is, which is otherwise easy to lose track of.
+ */
+function Minimap({ roomIndex, exitRoom, visited }: { roomIndex: number; exitRoom: number; visited: ReadonlySet<number> }) {
+  return <div className="er-minimap" role="img"
+    aria-label={`Embassy plan. You are in room ${roomIndex + 1} of 9. The gate is room ${exitRoom + 1}.`}>
+    {Array.from({ length: 9 }, (_, index) => {
+      const classes = ["er-cell"];
+      if (visited.has(index)) classes.push("er-cell-seen");
+      if (index === exitRoom) classes.push("er-cell-gate");
+      if (index === roomIndex) classes.push("er-cell-here");
+      return <span key={index} className={classes.join(" ")}>{index === exitRoom ? "▣" : ""}</span>;
+    })}
+  </div>;
+}
+
+/** Renders one item glyph with the same code the world view uses, so the two never drift. */
+function Glyph({ item, size = 22, dim = false }: { item: Carryable; size?: number; dim?: boolean }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    const scale = window.devicePixelRatio || 1;
+    canvas.width = size * scale;
+    canvas.height = size * scale;
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    context.clearRect(0, 0, size, size);
+    drawCarryableGlyph(context, size / 2, size / 2, size * 0.92, item, dim ? "#8d9678" : "#14180f");
+  }, [item, size, dim]);
+  return <canvas ref={ref} className="er-glyph" style={{ width: size, height: size }} aria-hidden="true" />;
+}
+
+/** The four mission items, showing at a glance which are held and which are still out there. */
+function MissionTrack({ inventory }: { inventory: readonly string[] }) {
+  return <div className="er-track" role="group" aria-label="Mission items">
+    {MISSION_ITEMS.map(item => {
+      const held = inventory.includes(item);
+      return <span key={item} className={`er-track-slot${held ? " er-track-held" : ""}`}
+        title={`${MISSION_ITEM_LABELS[item]}${held ? " — secured" : " — still missing"}`}>
+        <Glyph item={item} size={20} dim={!held} />
+        <small>{held ? "✓" : "—"}</small>
+      </span>;
+    })}
+    <span className="er-track-count">{inventory.length}/{MISSION_ITEMS.length}</span>
+  </div>;
+}
+
 function BriefingScreen(props: any) {
   const {
     economy, definition, rf, crateCount, canBuy, maxPrize, busy, paused, notice, identity,
     friendId, equippedKit, ownedKits, lobbies, netStatus, onBuy, onOpen, onSetMenu, onQuick,
-    onJoin, pendingPlay,
+    onJoin, pendingPlay, friendName, leaderboard,
   } = props;
   const kit = kitById(equippedKit);
   return <div className="er-briefing">
     <div className="er-panel er-dossier">
       <h2>Agent dossier</h2>
       <dl>
-        <div><dt>Codename</dt><dd>{identity?.codename ?? "—"}{identity?.genesis && <span className="er-badge">GENESIS</span>}</dd></div>
+        <div><dt>Codename</dt><dd>{displayName(identity?.codename ?? "—", friendName)}{identity?.genesis && <span className="er-badge">GENESIS</span>}</dd></div>
         <div><dt>Rare Friend</dt><dd>#{friendId.toString()}</dd></div>
         <div><dt>Simulated RF</dt><dd>{rf(economy.rfBalance)}</dd></div>
         <div><dt>Crates held</dt><dd>{crateCount.toString()}</dd></div>
@@ -839,6 +1109,12 @@ function BriefingScreen(props: any) {
         </button>
         <button type="button" disabled={busy || paused} onClick={() => onSetMenu("kits")}>Kits</button>
         <button type="button" disabled={busy || paused} onClick={() => onSetMenu("crate")}>Odds</button>
+        <button type="button" disabled={busy || paused} onClick={() => onSetMenu("codename")}>
+          {friendName ? "Rename" : "Name Friend"}
+        </button>
+        <button type="button" disabled={busy || paused} onClick={() => onSetMenu("leaderboard")}>
+          Standings{leaderboard?.length ? ` · ${leaderboard.length}` : ""}
+        </button>
       </div>
       {!canBuy && <p className="er-fine">
         {economy.rfBalance < definition.price
@@ -890,7 +1166,8 @@ function LobbyScreen({ lobby, identity, isHost, me, equippedKit, onKit, onReady,
         {lobby.members.map((member: LobbyMember) => <li key={member.playerId}
           className={member.playerId === identity?.playerId ? "er-me" : ""}>
           <span className="er-roster-name">
-            {member.codename}{member.genesis && <span className="er-badge">GENESIS</span>}
+            {displayName(member.codename, member.friendName)}
+            {member.genesis && <span className="er-badge">GENESIS</span>}
             {member.isHost && <span className="er-host">HOST</span>}
           </span>
           <span className="er-fine">Friend #{member.friendId} · {kitById(member.kitId).name}</span>
@@ -918,7 +1195,7 @@ function MatchScreen(props: any) {
   const {
     match, feed, targets, canvasRef, onCanvasPointer, onPrimary, onAttack, onTraps,
     onDisarm, onSettings, stickRef, inputBlocked, reducedMotion, netStatus,
-    artworkFailed, onRetryArtwork,
+    artworkFailed, onRetryArtwork, flashes, visitedRooms, exitRoom,
   } = props;
   const self = match.self as MatchSnapshot["self"];
   const minutes = Math.floor(match.secondsLeft / 60);
@@ -927,18 +1204,30 @@ function MatchScreen(props: any) {
   const primaryLabel = targets.atGate ? "Escape" : targets.drop ? "Pick up" : targets.furniture ? "Search" : "Walk closer";
   const trapTotal = TRAP_TYPES.reduce((total, type) => total + (self.traps[type] ?? 0), 0);
   const down = self.respawnMs > 0;
-  const canTrap = Boolean(targets.furniture) && !targets.furniture?.trap && trapTotal > 0;
+  const canTrap = Boolean(targets.furniture || targets.door) && !targets.trapHere && trapTotal > 0;
 
   return <div className="er-match">
     <div className="er-hud-top">
       {netStatus !== "online" && <span className={`er-dot er-dot-${netStatus}`} title="Relay connection" />}
       <span className="er-room">{match.roomName}</span>
       <span className={`er-timer${match.secondsLeft <= 30 ? " er-timer-low" : ""}`}>{minutes}:{seconds}</span>
-      <div className="er-items">
-        {MISSION_ITEMS.map(item => <span key={item}
-          className={`er-item${self.inventory.includes(item) ? " er-item-on" : ""}`}
-          title={MISSION_ITEM_LABELS[item]}>{MISSION_ITEM_LABELS[item].charAt(0)}</span>)}
-      </div>
+      <Minimap roomIndex={match.roomIndex} exitRoom={exitRoom} visited={visitedRooms} />
+      <MissionTrack inventory={self.inventory} />
+      {(() => {
+        // Colour by remaining fraction, so a full bar never reads as danger.
+        const fraction = Math.max(0, Math.min(1, self.hp / Math.max(1, self.maxHp)));
+        const state = fraction > 0.6 ? "ok" : fraction > 0.3 ? "low" : "critical";
+        return <div className={`er-health er-health-${state}`} title={`${self.hp} of ${self.maxHp} health`}>
+          <span className="er-health-bar">
+            <span className="er-health-fill" style={{ width: `${fraction * 100}%` }} />
+          </span>
+          <small>{self.hp}/{self.maxHp}</small>
+        </div>;
+      })()}
+      {self.powerUps.length > 0 && <div className="er-kitbadges">
+        {[...new Set(self.powerUps)].map((item: PowerUp) => <span key={item} className="er-kitbadge"
+          title={`${POWER_UP_LABELS[item]} — ${POWER_UP_BLURBS[item]}`}><Glyph item={item} size={16} /></span>)}
+      </div>}
       <button type="button" className="er-icon" onClick={onSettings} aria-label="Settings">≡</button>
     </div>
 
@@ -950,6 +1239,14 @@ function MatchScreen(props: any) {
       {down && <div className="er-down" role="status">
         <strong>Taken out</strong>
         <span>Back in {Math.ceil(self.respawnMs / 1000)}s</span>
+      </div>}
+
+      {flashes.length > 0 && <div className="er-flashes" aria-live="polite">
+        {flashes.map((flash: Flash) => <div key={flash.id} className={`er-flash er-flash-${flash.tone}`}>
+          {flash.item && <Glyph item={flash.item} size={46} />}
+          <strong>{flash.title}</strong>
+          <span>{flash.detail}</span>
+        </div>)}
       </div>}
 
       {artworkFailed > 0 && <div className="er-artwork-error" role="alert">
@@ -965,7 +1262,10 @@ function MatchScreen(props: any) {
       <aside className="er-scores">
         {match.scoreboard.map((player: PublicPlayer) => <div key={player.playerId}
           className={player.playerId === self.playerId ? "er-me" : ""}>
-          <span>{player.codename}{player.genesis ? " ◆" : ""}</span>
+          <span className="er-score-name">
+            {displayName(player.codename, player.friendName)}{player.genesis ? " ◆" : ""}
+            {player.hasKnife ? " ✚" : ""}
+          </span>
           <span>{player.items}/4{player.connected ? "" : " ·off"}</span>
         </div>)}
       </aside>
@@ -978,12 +1278,12 @@ function MatchScreen(props: any) {
         <button type="button" className="er-action er-action-primary" disabled={inputBlocked || down || !hasTarget}
           onClick={onPrimary}>{primaryLabel}<small>E</small></button>
         <button type="button" className="er-action" disabled={inputBlocked || down || !canTrap}
-          onClick={onTraps}>Trap<small>{trapTotal} · Q</small></button>
+          onClick={onTraps}>{targets.door ? "Trap door" : "Trap"}<small>{trapTotal} · Q</small></button>
         <button type="button" className="er-action" disabled={inputBlocked || down}
           onClick={onAttack}>Strike<small>F</small></button>
         {self.hasDisarm && <button type="button" className="er-action"
-          disabled={inputBlocked || down || !targets.furniture?.trap || targets.furniture?.trapMine}
-          onClick={onDisarm}>Disarm</button>}
+          disabled={inputBlocked || down || !targets.trapHere}
+          onClick={onDisarm}>Disarm<small>{targets.trapHere?.mine ? "yours" : "rival"}</small></button>}
       </div>
     </div>
   </div>;
@@ -1035,6 +1335,37 @@ function Stick({ stickRef, disabled, reducedMotion }: any) {
   </div>;
 }
 
+function EscapeScreen({ escape, sprites, reducedMotion, friendId, onDone }: any) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [skippable, setSkippable] = useState(false);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) { onDone(); return; }
+    let frame = 0;
+    const started = escape.startedAt;
+    const tick = (nowMs: number) => {
+      const progress = (nowMs - started) / ESCAPE_DURATION_MS;
+      drawEscapeScene(context, {
+        progress, codename: escape.codename, friendName: escape.friendName,
+        sprites: sprites.get(String(friendId)), reducedMotion, timeMs: nowMs, won: escape.won,
+      });
+      if (progress >= 1) { onDone(); return; }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    const allowSkip = setTimeout(() => setSkippable(true), 600);
+    return () => { cancelAnimationFrame(frame); clearTimeout(allowSkip); };
+  }, [escape, sprites, reducedMotion, friendId, onDone]);
+
+  return <div className="er-escape">
+    <canvas ref={ref} width={VIEW_W} height={VIEW_H} className="er-canvas"
+      aria-label={escape.won ? "Your agent escapes to the airport" : "The winning agent escapes"} />
+    {skippable && <button type="button" className="er-skip" onClick={onDone}>Skip</button>}
+  </div>;
+}
+
 function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
   const won = results.results.find((player: PublicPlayer) => player.playerId === identity?.playerId);
   return <div className="er-results">
@@ -1044,13 +1375,14 @@ function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
       <ol className="er-result-list">
         {results.results.map((player: PublicPlayer, index: number) => <li key={player.playerId}
           className={player.playerId === identity?.playerId ? "er-me" : ""}>
-          <span>{index + 1}. {player.codename}{player.genesis ? " ◆" : ""}</span>
-          <span>{player.items}/4 recovered · {player.deaths} losses</span>
+          <span>{index + 1}. {displayName(player.codename, player.friendName)}{player.genesis ? " ◆" : ""}</span>
+          <span>{player.score} pts · {player.items}/4 · {player.takedowns} takedowns · {player.deaths} losses</span>
         </li>)}
       </ol>
       <p className="er-fine">
-        Match results are recorded by the relay for this session only. No RF changed hands: kits are
-        kept in your simulated FriendSDK inventory whether you win or lose.
+        These points are added to your Friend's career total on the relay's standings, which persist
+        across matches and restarts. No RF changed hands: kits stay in your simulated FriendSDK
+        inventory whether you win or lose.
       </p>
       <div className="er-row">
         {inLobby && <button type="button" className="er-primary" onClick={onAgain}>Back to the lobby</button>}

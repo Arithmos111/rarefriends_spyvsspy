@@ -30,7 +30,10 @@ test("map generation is deterministic and fully walkable", () => {
 test("all four mission items are hidden in four distinct non-exit rooms", () => {
   const embassy = map.createMap(4242);
   map.placeMissionItems(embassy, 4242);
-  const holders = embassy.rooms.flatMap(room => room.furniture.filter(piece => piece.contents).map(piece => ({ room: room.index, item: piece.contents })));
+  // Furniture also holds power-ups now, so only the mission items are counted here.
+  const holders = embassy.rooms.flatMap(room => room.furniture
+    .filter(piece => piece.contents && P.MISSION_ITEMS.includes(piece.contents))
+    .map(piece => ({ room: room.index, item: piece.contents })));
   assert.equal(holders.length, P.MISSION_ITEMS.length);
   assert.equal(new Set(holders.map(entry => entry.item)).size, P.MISSION_ITEMS.length);
   assert.equal(new Set(holders.map(entry => entry.room)).size, P.MISSION_ITEMS.length);
@@ -70,8 +73,8 @@ test("an agent must line up with a doorway to use it", () => {
 test("searching furniture yields the hidden item exactly once", () => {
   const match = start(roster({ id: "a" }, { id: "b" }));
   const agent = match.players.get("a");
-  const room = match.map.rooms.find(entry => entry.furniture.some(piece => piece.contents));
-  const piece = room.furniture.find(entry => entry.contents);
+  const room = match.map.rooms.find(entry => entry.furniture.some(piece => P.MISSION_ITEMS.includes(piece.contents)));
+  const piece = room.furniture.find(entry => P.MISSION_ITEMS.includes(entry.contents));
   const item = piece.contents;
   agent.room = room.index; agent.x = piece.x; agent.y = piece.y + 30;
   sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
@@ -98,7 +101,7 @@ test("a rival letter bomb kills the searcher and spills their items", () => {
   const victim = match.players.get("b");
   const piece = match.map.rooms[0].furniture[0];
   planter.room = 0; planter.x = piece.x; planter.y = piece.y + 30;
-  sim.applyAction(match, "a", { kind: "plant", furnitureId: piece.id, trap: "bomb" });
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "bomb" });
   run(match, P.PLANT_MS + 100);
   assert.equal(match.traps.get(piece.id)?.type, "bomb");
   assert.equal(planter.traps.bomb, kits.kitById("demolition").traps.bomb - 1);
@@ -113,16 +116,32 @@ test("a rival letter bomb kills the searcher and spills their items", () => {
   assert.ok(!match.traps.has(piece.id), "a sprung trap is consumed");
 });
 
-test("your own trap does not catch you", () => {
+test("your own trap catches you too", () => {
   const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
   const agent = match.players.get("a");
   const piece = match.map.rooms[0].furniture[0];
   agent.room = 0; agent.x = piece.x; agent.y = piece.y + 30;
-  sim.applyAction(match, "a", { kind: "plant", furnitureId: piece.id, trap: "bomb" });
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "bomb" });
   run(match, P.PLANT_MS + 100);
   sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
   run(match, P.SEARCH_MS + 200);
-  assert.equal(agent.hp, P.PLAYER_MAX_HP);
+  assert.equal(agent.hp, 0, "an agent who forgets their own bomb should set it off");
+  assert.equal(agent.takedowns, 0, "blowing yourself up is nobody's takedown");
+});
+
+test("you can disarm your own trap to recover it", () => {
+  const match = start(roster({ id: "a", kit: "director" }, { id: "b" }));
+  const agent = match.players.get("a");
+  const piece = match.map.rooms[0].furniture[0];
+  agent.room = 0; agent.x = piece.x; agent.y = piece.y + 30;
+  const before = agent.traps.spring;
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "spring" });
+  run(match, P.PLANT_MS + 100);
+  assert.equal(agent.traps.spring, before - 1);
+  sim.applyAction(match, "a", { kind: "disarm", targetId: piece.id });
+  run(match, P.DISARM_MS + 100);
+  assert.ok(!match.traps.has(piece.id));
+  assert.equal(agent.traps.spring, before, "the trap returns to your kit");
 });
 
 test("a water bucket stuns without killing", () => {
@@ -131,7 +150,7 @@ test("a water bucket stuns without killing", () => {
   const victim = match.players.get("b");
   const piece = match.map.rooms[0].furniture[0];
   planter.room = 0; planter.x = piece.x; planter.y = piece.y + 30;
-  sim.applyAction(match, "a", { kind: "plant", furnitureId: piece.id, trap: "bucket" });
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "bucket" });
   run(match, P.PLANT_MS + 100);
   victim.room = 0; victim.x = piece.x; victim.y = piece.y + 30;
   victim.inventory.push("cash");
@@ -142,20 +161,21 @@ test("a water bucket stuns without killing", () => {
   assert.ok(victim.stunnedUntil > match.now);
 });
 
-test("two strikes take an agent down and respawn restores them", () => {
+test("five fist blows take an agent down and respawn restores them", () => {
   const match = start(roster({ id: "a" }, { id: "b" }));
   const attacker = match.players.get("a");
   const target = match.players.get("b");
   attacker.room = 0; attacker.x = 200; attacker.y = 200;
-  target.room = 0; target.x = 220; target.y = 200;
   target.invulnerableUntil = 0; attacker.invulnerableUntil = 0;
-  sim.applyAction(match, "a", { kind: "attack" });
-  assert.equal(target.hp, P.PLAYER_MAX_HP - 1);
-  run(match, P.ATTACK_COOLDOWN_MS + 100);
-  target.x = 220; target.y = 200;
-  sim.applyAction(match, "a", { kind: "attack" });
-  assert.equal(target.hp, 0);
+  assert.equal(P.PLAYER_MAX_HP, 5);
+  for (let blow = 1; blow <= P.PLAYER_MAX_HP; blow++) {
+    target.room = 0; target.x = 220; target.y = 200;
+    sim.applyAction(match, "a", { kind: "attack" });
+    assert.equal(target.hp, Math.max(0, P.PLAYER_MAX_HP - blow), `after blow ${blow}`);
+    run(match, P.ATTACK_COOLDOWN_MS + 60);
+  }
   assert.equal(target.deaths, 1);
+  assert.equal(attacker.takedowns, 1);
   run(match, P.RESPAWN_MS + 200);
   assert.equal(target.hp, P.PLAYER_MAX_HP);
   assert.equal(target.respawnAt, 0);
@@ -239,11 +259,11 @@ test("a disarm tool steals a rival trap", () => {
   const thief = match.players.get("b");
   const piece = match.map.rooms[0].furniture[0];
   planter.room = 0; planter.x = piece.x; planter.y = piece.y + 30;
-  sim.applyAction(match, "a", { kind: "plant", furnitureId: piece.id, trap: "spring" });
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "spring" });
   run(match, P.PLANT_MS + 100);
   const before = thief.traps.spring;
   thief.room = 0; thief.x = piece.x; thief.y = piece.y + 30;
-  sim.applyAction(match, "b", { kind: "disarm", furnitureId: piece.id });
+  sim.applyAction(match, "b", { kind: "disarm", targetId: piece.id });
   run(match, P.DISARM_MS + 100);
   assert.ok(!match.traps.has(piece.id));
   assert.equal(thief.traps.spring, before + 1);
@@ -319,4 +339,164 @@ test("a real generated room lets an agent reach every piece it holds", () => {
       assert.ok(reachable, `room ${room.index}: ${piece.type} at ${piece.x},${piece.y} is unreachable`);
     }
   }
+});
+
+// --- Power-ups, the knife, door traps and scoring ---------------------------------------
+
+const giveContents = (match, item) => {
+  const piece = match.map.rooms[0].furniture[0];
+  piece.contents = item;
+  match.traps.delete(piece.id);
+  return piece;
+};
+const standAt = (player, piece, room = 0) => {
+  player.room = room; player.x = piece.x; player.y = piece.y + 30;
+};
+
+test("exactly one knife exists in a generated embassy", () => {
+  for (const seed of [1, 99, 31337, 2026]) {
+    const embassy = map.createMap(seed);
+    map.placeMissionItems(embassy, seed);
+    const knives = embassy.rooms.flatMap(room => room.furniture.filter(piece => piece.contents === "knife"));
+    assert.equal(knives.length, 1, `seed ${seed} should hide exactly one knife`);
+  }
+});
+
+test("the knife doubles strike damage and drops when its holder is taken down", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const attacker = match.players.get("a");
+  const target = match.players.get("b");
+  const piece = giveContents(match, "knife");
+  standAt(attacker, piece);
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.equal(attacker.knife, true);
+  assert.equal(sim.attackDamage(attacker), P.KNIFE_DAMAGE);
+
+  attacker.x = 200; attacker.y = 200; attacker.invulnerableUntil = 0;
+  target.room = 0; target.x = 220; target.y = 200; target.invulnerableUntil = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.equal(target.hp, P.PLAYER_MAX_HP - P.KNIFE_DAMAGE, "a knife hits for two");
+
+  // Taking the holder down must put the knife back into circulation. Clear the stun the
+  // blow above inflicted, or the counterattack is correctly refused.
+  attacker.hp = 1;
+  target.attackReadyAt = 0;
+  target.stunnedUntil = 0;
+  sim.applyAction(match, "b", { kind: "attack" });
+  assert.equal(attacker.hp, 0);
+  assert.equal(attacker.knife, false);
+  assert.ok(match.drops.some(drop => drop.item === "knife"), "the knife should drop where its holder fell");
+});
+
+test("a medkit heals but never past your maximum", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const agent = match.players.get("a");
+  agent.hp = 1;
+  const piece = giveContents(match, "medkit");
+  standAt(agent, piece);
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.equal(agent.hp, Math.min(P.PLAYER_MAX_HP, 1 + P.MEDKIT_HEAL));
+  assert.ok(agent.hp <= agent.maxHp);
+});
+
+test("a vest raises the ceiling and respawn restores to it", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const agent = match.players.get("a");
+  const piece = giveContents(match, "vest");
+  standAt(agent, piece);
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.equal(agent.maxHp, P.PLAYER_MAX_HP + P.VEST_BONUS_HP);
+  agent.hp = 1;
+  agent.respawnAt = match.now + 10;
+  run(match, P.RESPAWN_MS + 200);
+  assert.equal(agent.hp, P.PLAYER_MAX_HP + P.VEST_BONUS_HP, "respawn restores the raised maximum");
+});
+
+test("a trap on a doorway fires on whoever walks through it", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const planter = match.players.get("a");
+  const victim = match.players.get("b");
+  const doorId = P.doorTrapId(0, "east");
+  planter.room = 0; planter.x = P.ROOM_W; planter.y = P.ROOM_H / 2;
+  sim.applyAction(match, "a", { kind: "plant", targetId: doorId, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+  assert.equal(match.traps.get(doorId)?.type, "bomb", "the doorway should hold the trap");
+
+  victim.room = 0; victim.x = P.ROOM_W - 40; victim.y = P.ROOM_H / 2;
+  victim.invulnerableUntil = 0;
+  sim.applyInput(match, "b", 1, 1, 0);
+  run(match, 2000);
+  assert.equal(victim.hp, 0, "walking the trapped doorway should spring it");
+  assert.ok(!match.traps.has(doorId), "a sprung doorway trap is consumed");
+});
+
+test("a doorway trap catches the agent who set it as well", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const planter = match.players.get("a");
+  const doorId = P.doorTrapId(0, "east");
+  planter.room = 0; planter.x = P.ROOM_W; planter.y = P.ROOM_H / 2;
+  sim.applyAction(match, "a", { kind: "plant", targetId: doorId, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+  planter.x = P.ROOM_W - 40; planter.invulnerableUntil = 0;
+  sim.applyInput(match, "a", 1, 1, 0);
+  run(match, 2000);
+  assert.equal(planter.hp, 0);
+});
+
+test("traps cannot be planted out of reach of their target", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const agent = match.players.get("a");
+  agent.room = 0; agent.x = 60; agent.y = 60;
+  sim.applyAction(match, "a", { kind: "plant", targetId: P.doorTrapId(0, "east"), trap: "bomb" });
+  assert.equal(agent.busy, null, "the far doorway is out of reach");
+  sim.applyAction(match, "a", { kind: "plant", targetId: P.doorTrapId(0, "north"), trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+  assert.ok(!match.traps.has(P.doorTrapId(0, "north")), "still out of reach from the corner");
+});
+
+test("match points reward escaping, items and takedowns", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const agent = match.players.get("a");
+  agent.itemsFound = 3;
+  agent.takedowns = 2;
+  assert.equal(sim.scoreOf(match, agent), 3 * P.SCORE_PER_ITEM + 2 * P.SCORE_PER_TAKEDOWN);
+
+  agent.room = match.map.exitRoom;
+  agent.x = map.EXIT_X; agent.y = map.EXIT_Y;
+  agent.inventory.push(...P.MISSION_ITEMS);
+  sim.applyAction(match, "a", { kind: "escape" });
+  assert.equal(match.finished, true);
+  assert.equal(match.escaped, true);
+  assert.equal(
+    sim.scoreOf(match, agent),
+    3 * P.SCORE_PER_ITEM + 2 * P.SCORE_PER_TAKEDOWN + P.SCORE_ESCAPE + P.SCORE_SURVIVED,
+  );
+});
+
+test("dropping items on death gives back the points they carried", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const agent = match.players.get("a");
+  agent.inventory.push("documents", "cash");
+  agent.itemsFound = 2;
+  agent.hp = 1;
+  const attacker = match.players.get("b");
+  attacker.room = agent.room; attacker.x = agent.x + 20; attacker.y = agent.y;
+  agent.invulnerableUntil = 0;
+  sim.applyAction(match, "b", { kind: "attack" });
+  assert.equal(agent.hp, 0);
+  assert.equal(agent.itemsFound, 0, "carried items stop counting once dropped");
+  assert.equal(sim.scoreOf(match, agent), 0);
+});
+
+test("friend names are validated before display", () => {
+  assert.equal(P.normaliseFriendName("  Night jar  "), "Night jar");
+  assert.equal(P.normaliseFriendName("O'Hara-7"), "O'Hara-7");
+  assert.equal(P.normaliseFriendName(""), null);
+  assert.equal(P.normaliseFriendName("<script>"), null);
+  assert.equal(P.normaliseFriendName("x".repeat(40)).length, P.MAX_FRIEND_NAME);
+  assert.equal(P.displayName("FALCON", "Nightjar"), "FALCON (Nightjar)");
+  assert.equal(P.displayName("FALCON", null), "FALCON");
 });

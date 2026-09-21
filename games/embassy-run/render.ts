@@ -10,8 +10,10 @@
  */
 import { spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/sprites";
 import {
-  DOOR_HALF_WIDTH, FURNITURE_FOOTPRINT, MISSION_ITEM_LABELS, ROOM_H, ROOM_W,
-  type Direction, type FurnitureType, type MatchSnapshot, type RoomActor,
+  DOOR_HALF_WIDTH, FURNITURE_FOOTPRINT, MISSION_ITEMS, ROOM_H, ROOM_W,
+  carryableLabel, doorTrapDirection, isDoorTrapId,
+  type Carryable, type DecorType, type Direction, type FurnitureType, type MatchSnapshot,
+  type RoomActor, type RoomDecor, type RoomTrap,
 } from "./shared/protocol.ts";
 import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "./shared/mansion.ts";
 
@@ -56,8 +58,12 @@ export type RenderInput = {
   selfX: number;
   selfY: number;
   sprites: Sprites;
+  /** Static dressing for this room, rebuilt client-side from the map seed. */
+  decor: readonly RoomDecor[];
   nearestFurnitureId: number | null;
   nearestDropId: number | null;
+  /** Doorway the agent is standing close enough to trap. */
+  nearestDoor: Direction | null;
   reducedMotion: boolean;
   timeMs: number;
 };
@@ -71,9 +77,23 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
   context.fillRect(0, 0, VIEW_W, VIEW_H);
 
   drawFloor(context);
+  drawFloorDecor(context, input.decor);
   drawWalls(context, snapshot.doors);
-  for (const direction of snapshot.doors) drawDoorway(context, direction, timeMs, reducedMotion);
+  drawRoomSign(context, snapshot.roomName, snapshot.doors);
+  drawWallDecor(context, input.decor);
+  for (const direction of snapshot.doors) {
+    drawDoorway(context, direction, timeMs, reducedMotion, direction === input.nearestDoor);
+  }
   if (snapshot.exitHere) drawGate(context, snapshot.self.inventory.length, timeMs, reducedMotion);
+
+  // Doorway traps sit flat in the threshold, so they draw with the floor rather than sorted.
+  for (const trap of snapshot.traps) {
+    if (!isDoorTrapId(trap.targetId)) continue;
+    const direction = doorTrapDirection(trap.targetId);
+    if (!snapshot.doors.includes(direction)) continue;
+    const anchor = doorAnchorWorld(direction);
+    drawTrapMarker(context, anchor.x, anchor.y, 6, trap, timeMs, reducedMotion);
+  }
 
   type Layer = { depth: number; draw: () => void };
   const layers: Layer[] = [];
@@ -85,10 +105,12 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
     });
   }
 
+  const trapByTarget = new Map(snapshot.traps.map(trap => [trap.targetId, trap]));
   for (const piece of snapshot.furniture) {
+    const trap = trapByTarget.get(piece.id) ?? null;
     layers.push({
       depth: depthOf(piece.x, piece.y),
-      draw: () => drawFurniture(context, piece, piece.id === input.nearestFurnitureId, timeMs, reducedMotion),
+      draw: () => drawFurniture(context, piece, trap, piece.id === input.nearestFurnitureId, timeMs, reducedMotion),
     });
   }
 
@@ -142,6 +164,119 @@ function drawFloor(context: CanvasRenderingContext2D): void {
 
 const WALL_HEIGHT = 105;
 
+/** A brass plate on the back wall naming the room, so the embassy reads as a building. */
+function drawRoomSign(context: CanvasRenderingContext2D, name: string, doors: readonly Direction[]): void {
+  // Hang it on whichever far wall is not interrupted by a doorway near its middle.
+  const onNorth = !doors.includes("north");
+  const [ax, ay] = onNorth ? project(ROOM_W * 0.5, 0) : project(0, ROOM_H * 0.5);
+  const label = name.toUpperCase();
+  context.save();
+  context.font = "700 15px ui-monospace, monospace";
+  context.textAlign = "center";
+  const width = Math.max(120, context.measureText(label).width + 30);
+  const top = ay - WALL_HEIGHT + 20;
+  context.fillStyle = PAPER;
+  context.strokeStyle = INK;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.roundRect(ax - width / 2, top, width, 28, 4);
+  context.fill();
+  context.stroke();
+  // Two fixing screws, which is what sells it as a plate rather than a label.
+  for (const offset of [-width / 2 + 9, width / 2 - 9]) {
+    context.beginPath();
+    context.arc(ax + offset, top + 14, 2.2, 0, Math.PI * 2);
+    context.fillStyle = WALL_DARK;
+    context.fill();
+  }
+  context.fillStyle = INK;
+  context.fillText(label, ax, top + 19);
+  context.restore();
+}
+
+/** Flat dressing that belongs under everything else. */
+function drawFloorDecor(context: CanvasRenderingContext2D, decor: readonly RoomDecor[]): void {
+  for (const piece of decor) {
+    if (piece.type !== "rug") continue;
+    const [sx, sy] = project(piece.x, piece.y);
+    context.save();
+    context.beginPath();
+    context.ellipse(sx, sy, 92, 34, 0, 0, Math.PI * 2);
+    context.fillStyle = piece.variant % 2 ? "#c2cbae" : "#c8d0b6";
+    context.fill();
+    context.strokeStyle = FLOOR_LINE;
+    context.lineWidth = 3;
+    context.stroke();
+    context.beginPath();
+    context.ellipse(sx, sy, 72, 25, 0, 0, Math.PI * 2);
+    context.stroke();
+    context.restore();
+  }
+}
+
+/** Pictures, banners, clocks and flags hung on the two far walls. */
+function drawWallDecor(context: CanvasRenderingContext2D, decor: readonly RoomDecor[]): void {
+  for (const piece of decor) {
+    if (piece.type === "rug" || piece.type === "lamp" || piece.type === "bookshelf") continue;
+    const [sx, sy] = project(piece.x, piece.y);
+    const top = sy - WALL_HEIGHT + 34;
+    context.save();
+    context.strokeStyle = INK;
+    context.lineWidth = 2;
+    if (piece.type === "portrait") {
+      context.fillStyle = PAPER;
+      context.fillRect(sx - 17, top, 34, 42);
+      context.strokeRect(sx - 17, top, 34, 42);
+      context.fillStyle = WALL_DARK;
+      context.beginPath();
+      context.arc(sx, top + 16, 7, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.moveTo(sx - 10, top + 38);
+      context.quadraticCurveTo(sx, top + 22, sx + 10, top + 38);
+      context.fill();
+    } else if (piece.type === "banner") {
+      context.fillStyle = piece.variant % 2 ? SIGNAL : PAPER;
+      context.beginPath();
+      context.moveTo(sx - 14, top);
+      context.lineTo(sx + 14, top);
+      context.lineTo(sx + 14, top + 46);
+      context.lineTo(sx, top + 36);
+      context.lineTo(sx - 14, top + 46);
+      context.closePath();
+      context.fill();
+      context.stroke();
+    } else if (piece.type === "clock") {
+      context.fillStyle = PAPER;
+      context.beginPath();
+      context.arc(sx, top + 18, 15, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.beginPath();
+      context.moveTo(sx, top + 18);
+      context.lineTo(sx, top + 8);
+      context.moveTo(sx, top + 18);
+      context.lineTo(sx + 8, top + 21);
+      context.stroke();
+    } else {
+      // Flag on a short pole.
+      context.beginPath();
+      context.moveTo(sx - 14, top);
+      context.lineTo(sx - 14, top + 46);
+      context.stroke();
+      context.fillStyle = piece.variant % 2 ? SIGNAL : "#b9c2a6";
+      context.beginPath();
+      context.moveTo(sx - 14, top + 3);
+      context.lineTo(sx + 18, top + 11);
+      context.lineTo(sx - 14, top + 22);
+      context.closePath();
+      context.fill();
+      context.stroke();
+    }
+    context.restore();
+  }
+}
+
 /** Back walls run along the two far edges; doorways there are drawn as gaps. */
 function drawWalls(context: CanvasRenderingContext2D, doors: readonly Direction[]): void {
   const segments: { from: [number, number]; to: [number, number] }[] = [];
@@ -186,7 +321,17 @@ function doorAnchor(direction: Direction): [number, number] {
   return [ROOM_W, ROOM_H / 2];
 }
 
-function drawDoorway(context: CanvasRenderingContext2D, direction: Direction, timeMs: number, reducedMotion: boolean): void {
+export function doorAnchorWorld(direction: Direction): { x: number; y: number } {
+  if (direction === "north") return { x: ROOM_W / 2, y: 0 };
+  if (direction === "south") return { x: ROOM_W / 2, y: ROOM_H };
+  if (direction === "west") return { x: 0, y: ROOM_H / 2 };
+  return { x: ROOM_W, y: ROOM_H / 2 };
+}
+
+function drawDoorway(
+  context: CanvasRenderingContext2D, direction: Direction, timeMs: number,
+  reducedMotion: boolean, highlighted = false,
+): void {
   const horizontal = direction === "north" || direction === "south";
   const [cx, cy] = doorAnchor(direction);
   const corners: [number, number][] = horizontal
@@ -205,8 +350,15 @@ function drawDoorway(context: CanvasRenderingContext2D, direction: Direction, ti
   context.fillStyle = `rgba(204, 255, 0, ${pulse.toFixed(3)})`;
   context.fill();
   context.strokeStyle = SIGNAL;
-  context.lineWidth = 2;
+  context.lineWidth = highlighted ? 4 : 2;
   context.stroke();
+  if (highlighted) {
+    context.setLineDash([6, 5]);
+    context.strokeStyle = INK;
+    context.lineWidth = 2;
+    context.stroke();
+    context.setLineDash([]);
+  }
 }
 
 function drawGate(context: CanvasRenderingContext2D, carried: number, timeMs: number, reducedMotion: boolean): void {
@@ -278,9 +430,38 @@ const FURNITURE_HEIGHT: Record<FurnitureType, number> = {
   safe: 48, desk: 34, cabinet: 62, crate: 50, locker: 70, console: 40, planter: 54, painting: 52,
 };
 
+/** A warning pennant over a trapped furniture piece or doorway. Green is yours, amber is not. */
+export function drawTrapMarker(
+  context: CanvasRenderingContext2D, worldX: number, worldY: number, lift: number,
+  trap: RoomTrap, timeMs: number, reducedMotion: boolean,
+): void {
+  const [sx, sy] = project(worldX, worldY);
+  const top = sy - lift;
+  const pulse = reducedMotion ? 1 : 0.55 + 0.45 * (1 + Math.sin(timeMs / 220)) / 2;
+  context.save();
+  context.globalAlpha = pulse;
+  context.fillStyle = trap.mine ? SIGNAL : ALERT;
+  context.strokeStyle = INK;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(sx, top - 26);
+  context.lineTo(sx + 11, top - 8);
+  context.lineTo(sx - 11, top - 8);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  context.globalAlpha = 1;
+  context.fillStyle = INK;
+  context.font = "700 11px ui-monospace, monospace";
+  context.textAlign = "center";
+  context.fillText("!", sx, top - 11);
+  context.restore();
+}
+
 function drawFurniture(
   context: CanvasRenderingContext2D,
   piece: MatchSnapshot["furniture"][number],
+  trap: RoomTrap | null,
   highlighted: boolean,
   timeMs: number,
   reducedMotion: boolean,
@@ -321,27 +502,7 @@ function drawFurniture(
     context.fillText("SEARCHED", sx, sy + 13);
   }
 
-  if (piece.trap) {
-    const pulse = reducedMotion ? 1 : 0.55 + 0.45 * (1 + Math.sin(timeMs / 220)) / 2;
-    context.save();
-    context.globalAlpha = pulse;
-    context.fillStyle = piece.trapMine ? SIGNAL : ALERT;
-    context.strokeStyle = INK;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(sx, sy - height - 26);
-    context.lineTo(sx + 11, sy - height - 8);
-    context.lineTo(sx - 11, sy - height - 8);
-    context.closePath();
-    context.fill();
-    context.stroke();
-    context.globalAlpha = 1;
-    context.fillStyle = INK;
-    context.font = "700 11px ui-monospace, monospace";
-    context.textAlign = "center";
-    context.fillText("!", sx, sy - height - 11);
-    context.restore();
-  }
+  if (trap) drawTrapMarker(context, piece.x, piece.y, height, trap, timeMs, reducedMotion);
 
   if (highlighted) {
     context.save();
@@ -352,6 +513,78 @@ function drawFurniture(
     context.stroke();
     context.restore();
   }
+}
+
+/**
+ * One glyph per carryable, drawn in a box of `size` centred on (x, y). Used both for items
+ * lying on the floor and for the on-screen inventory, so the two always agree.
+ */
+export function drawCarryableGlyph(
+  context: CanvasRenderingContext2D, x: number, y: number, size: number,
+  item: Carryable, ink = INK,
+): void {
+  const u = size / 16;
+  context.save();
+  context.translate(x - size / 2, y - size / 2);
+  context.strokeStyle = ink;
+  context.fillStyle = ink;
+  context.lineWidth = Math.max(1.2, 1.6 * u);
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  context.beginPath();
+  switch (item) {
+    case "documents":
+      context.rect(3 * u, 2 * u, 10 * u, 12 * u);
+      context.moveTo(5 * u, 5 * u); context.lineTo(11 * u, 5 * u);
+      context.moveTo(5 * u, 8 * u); context.lineTo(11 * u, 8 * u);
+      context.moveTo(5 * u, 11 * u); context.lineTo(9 * u, 11 * u);
+      break;
+    case "passport":
+      context.rect(4 * u, 2 * u, 9 * u, 12 * u);
+      context.moveTo(4 * u, 2 * u); context.lineTo(3 * u, 3 * u);
+      context.lineTo(3 * u, 15 * u); context.lineTo(4 * u, 14 * u);
+      context.moveTo(11 * u, 8 * u);
+      context.arc(8.5 * u, 8 * u, 2.5 * u, 0, Math.PI * 2);
+      break;
+    case "cash":
+      context.rect(2 * u, 4 * u, 12 * u, 8 * u);
+      context.moveTo(10.5 * u, 8 * u);
+      context.arc(8 * u, 8 * u, 2.5 * u, 0, Math.PI * 2);
+      context.moveTo(4 * u, 6 * u); context.lineTo(4.4 * u, 6 * u);
+      context.moveTo(12 * u, 10 * u); context.lineTo(11.6 * u, 10 * u);
+      break;
+    case "disguise":
+      context.moveTo(2 * u, 7 * u); context.lineTo(14 * u, 7 * u);
+      context.moveTo(5.5 * u, 7 * u);
+      context.arc(4 * u, 7 * u, 1.5 * u, 0, Math.PI * 2);
+      context.moveTo(13.5 * u, 7 * u);
+      context.arc(12 * u, 7 * u, 1.5 * u, 0, Math.PI * 2);
+      context.moveTo(6 * u, 11 * u);
+      context.quadraticCurveTo(8 * u, 13.5 * u, 10 * u, 11 * u);
+      break;
+    case "medkit":
+      context.rect(2 * u, 4 * u, 12 * u, 9 * u);
+      context.moveTo(8 * u, 6 * u); context.lineTo(8 * u, 11 * u);
+      context.moveTo(5.5 * u, 8.5 * u); context.lineTo(10.5 * u, 8.5 * u);
+      break;
+    case "vest":
+      context.moveTo(8 * u, 2 * u);
+      context.lineTo(13 * u, 4.5 * u);
+      context.lineTo(13 * u, 9 * u);
+      context.quadraticCurveTo(13 * u, 13 * u, 8 * u, 14.5 * u);
+      context.quadraticCurveTo(3 * u, 13 * u, 3 * u, 9 * u);
+      context.lineTo(3 * u, 4.5 * u);
+      context.closePath();
+      break;
+    case "knife":
+      context.moveTo(3 * u, 13 * u); context.lineTo(10 * u, 6 * u);
+      context.lineTo(13 * u, 2 * u); context.lineTo(12 * u, 6 * u);
+      context.lineTo(6 * u, 12 * u); context.closePath();
+      context.moveTo(3 * u, 13 * u); context.lineTo(5 * u, 15 * u);
+      break;
+  }
+  context.stroke();
+  context.restore();
 }
 
 function drawDrop(
@@ -370,15 +603,10 @@ function drawDrop(
   context.strokeStyle = INK;
   context.lineWidth = 2;
   context.beginPath();
-  context.rect(sx - 12, sy - 26, 24, 17);
+  context.roundRect(sx - 14, sy - 32, 28, 26, 4);
   context.fill();
   context.stroke();
-  context.beginPath();
-  context.moveTo(sx - 4, sy - 26);
-  context.lineTo(sx - 4, sy - 30);
-  context.lineTo(sx + 4, sy - 30);
-  context.lineTo(sx + 4, sy - 26);
-  context.stroke();
+  drawCarryableGlyph(context, sx, sy - 19, 18, item as Carryable);
   if (highlighted) {
     context.strokeStyle = SIGNAL;
     context.lineWidth = 3;
@@ -390,7 +618,7 @@ function drawDrop(
   context.fillStyle = INK;
   context.font = "600 11px ui-monospace, monospace";
   context.textAlign = "center";
-  context.fillText(MISSION_ITEM_LABELS[item as keyof typeof MISSION_ITEM_LABELS] ?? item, sx, sy + 17);
+  context.fillText(carryableLabel(item as Carryable), sx, sy + 17);
 }
 
 /**
@@ -447,7 +675,7 @@ function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: 
   context.save();
   context.textAlign = "center";
   context.font = "700 12px ui-monospace, monospace";
-  const label = `${actor.codename}${actor.genesis ? " ◆" : ""}`;
+  const label = `${actor.friendName ? `${actor.codename} (${actor.friendName})` : actor.codename}${actor.genesis ? " ◆" : ""}`;
   const width = context.measureText(label).width + 12;
   context.fillStyle = isSelf ? SIGNAL : "rgba(238,241,228,0.92)";
   context.strokeStyle = INK;
@@ -461,18 +689,37 @@ function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: 
 
   context.restore();
 
-  // Injury pips sit by the feet, and only appear once an agent has been hit.
-  if (actor.hp < 2 && actor.hp > 0) {
+  // A health bar by the feet, shown only once an agent has actually been hurt.
+  if (actor.hp > 0 && actor.hp < actor.maxHp) {
+    const barWidth = 44;
+    const barY = Math.round(y) + 8;
+    const fraction = Math.max(0, Math.min(1, actor.hp / Math.max(1, actor.maxHp)));
     context.save();
-    for (let pip = 0; pip < 2; pip++) {
-      context.beginPath();
-      context.arc(Math.round(x) - 7 + pip * 14, Math.round(y) + 11, 4, 0, Math.PI * 2);
-      context.fillStyle = pip < actor.hp ? ALERT : "rgba(238,241,228,0.85)";
-      context.fill();
-      context.strokeStyle = INK;
-      context.lineWidth = 1.5;
-      context.stroke();
-    }
+    context.fillStyle = "rgba(238,241,228,0.95)";
+    context.strokeStyle = INK;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.roundRect(Math.round(x) - barWidth / 2, barY, barWidth, 7, 3);
+    context.fill();
+    context.stroke();
+    context.fillStyle = fraction > 0.5 ? SIGNAL : ALERT;
+    context.beginPath();
+    context.roundRect(Math.round(x) - barWidth / 2 + 2, barY + 2, (barWidth - 4) * fraction, 3, 1.5);
+    context.fill();
+    context.restore();
+  }
+
+  // Anyone carrying the stiletto advertises it, so the room knows who to avoid.
+  if (actor.hasKnife) {
+    context.save();
+    context.fillStyle = ALERT;
+    context.strokeStyle = INK;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(Math.round(x) + 26, top + 16, 10, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    drawCarryableGlyph(context, Math.round(x) + 26, top + 16, 13, "knife", INK);
     context.restore();
   }
 
@@ -520,4 +767,176 @@ export function unproject(screenX: number, screenY: number): [number, number] {
   const u = (screenX - CX + OFF) / AX;
   const v = (screenY - CY) / BY;
   return [(v + u) / 2, (v - u) / 2];
+}
+
+// --- Escape sequence ---------------------------------------------------------------------
+
+export const ESCAPE_DURATION_MS = 6200;
+
+/**
+ * Plays when an agent carries the full set through the courtyard gate: a dash across the
+ * apron and a departure. Drawn on the same canvas at the same 960x640, so it inherits the
+ * embassy's palette rather than introducing a second visual language.
+ *
+ * `progress` runs 0 to 1. Reduced motion holds the final frame instead of animating.
+ */
+export function drawEscapeScene(
+  context: CanvasRenderingContext2D,
+  options: {
+    progress: number; codename: string; friendName: string | null;
+    sprites: GenerationSprites | "loading" | "error" | undefined;
+    reducedMotion: boolean; timeMs: number; won: boolean;
+  },
+): void {
+  const t = options.reducedMotion ? 0.82 : Math.max(0, Math.min(1, options.progress));
+  const horizon = 430;
+
+  context.save();
+  context.imageSmoothingEnabled = false;
+
+  // Night sky graded down to the apron.
+  const sky = context.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, "#0d1108");
+  sky.addColorStop(1, "#2d3720");
+  context.fillStyle = sky;
+  context.fillRect(0, 0, VIEW_W, horizon);
+
+  // Stars, fixed by index so they do not shimmer between frames.
+  context.fillStyle = "rgba(238,241,228,0.75)";
+  for (let i = 0; i < 46; i++) {
+    const sx = (i * 197) % VIEW_W;
+    const sy = (i * 83) % (horizon - 60);
+    const twinkle = options.reducedMotion ? 1 : 0.5 + 0.5 * Math.sin(options.timeMs / 500 + i);
+    context.globalAlpha = 0.25 + 0.55 * twinkle;
+    context.fillRect(sx, sy, 2, 2);
+  }
+  context.globalAlpha = 1;
+
+  // Control tower and terminal on the far side.
+  context.fillStyle = "#1c2313";
+  context.fillRect(60, horizon - 150, 120, 150);
+  context.fillRect(640, horizon - 96, 240, 96);
+  context.fillStyle = SIGNAL;
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
+      if ((row + col + options.codename.length) % 3 === 0) continue;
+      context.fillRect(76 + col * 34, horizon - 138 + row * 26, 16, 12);
+    }
+  }
+  for (let col = 0; col < 8; col++) context.fillRect(660 + col * 28, horizon - 80, 18, 14);
+
+  // Apron.
+  context.fillStyle = "#3b4529";
+  context.fillRect(0, horizon, VIEW_W, VIEW_H - horizon);
+  context.strokeStyle = "#55603c";
+  context.lineWidth = 3;
+  for (let x = -100; x < VIEW_W + 100; x += 120) {
+    context.beginPath();
+    context.moveTo(x, horizon);
+    context.lineTo(x - 140, VIEW_H);
+    context.stroke();
+  }
+  context.setLineDash([46, 34]);
+  context.strokeStyle = SIGNAL;
+  context.lineWidth = 5;
+  context.beginPath();
+  context.moveTo(0, horizon + 132);
+  context.lineTo(VIEW_W, horizon + 96);
+  context.stroke();
+  context.setLineDash([]);
+
+  // The aircraft taxis in, waits, then climbs away.
+  const planeX = t < 0.55 ? -260 + t * (900 / 0.55) : 640 + (t - 0.55) * 1500;
+  const planeY = t < 0.72 ? horizon - 40 : horizon - 40 - (t - 0.72) * 900;
+  drawPlane(context, planeX, planeY, options.reducedMotion ? 0 : options.timeMs);
+
+  // The agent sprints on, boards, and is gone.
+  if (t < 0.7) {
+    const runX = 120 + t * 640;
+    const bob = options.reducedMotion ? 0 : Math.abs(Math.sin(options.timeMs / 90)) * 5;
+    drawEscapeAgent(context, runX, horizon + 96 - bob, options.sprites, options.timeMs, options.reducedMotion);
+  }
+
+  // Caption.
+  const name = options.friendName ? `${options.codename} (${options.friendName})` : options.codename;
+  context.textAlign = "center";
+  context.fillStyle = PAPER;
+  context.font = "700 34px ui-monospace, monospace";
+  context.fillText(options.won ? "EXFILTRATED" : "THE GATE CLOSES", VIEW_W / 2, 92);
+  context.font = "600 17px ui-monospace, monospace";
+  context.fillStyle = SIGNAL;
+  context.fillText(
+    options.won ? `${name} cleared the embassy with the full set.` : `${name} did not make the flight.`,
+    VIEW_W / 2, 124,
+  );
+  context.restore();
+}
+
+function drawPlane(context: CanvasRenderingContext2D, x: number, y: number, timeMs: number): void {
+  context.save();
+  context.translate(x, y);
+  context.fillStyle = PAPER;
+  context.strokeStyle = INK;
+  context.lineWidth = 3;
+  // Fuselage.
+  context.beginPath();
+  context.moveTo(-150, 0);
+  context.quadraticCurveTo(-120, -26, -20, -28);
+  context.lineTo(90, -26);
+  context.quadraticCurveTo(140, -22, 156, 0);
+  context.quadraticCurveTo(120, 14, -20, 14);
+  context.lineTo(-120, 12);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  // Tail.
+  context.beginPath();
+  context.moveTo(-150, 0);
+  context.lineTo(-138, -64);
+  context.lineTo(-96, -26);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  // Wing.
+  context.beginPath();
+  context.moveTo(10, 4);
+  context.lineTo(-56, 42);
+  context.lineTo(24, 42);
+  context.lineTo(62, 6);
+  context.closePath();
+  context.fillStyle = "#c3cbb0";
+  context.fill();
+  context.stroke();
+  // Windows and a blinking beacon.
+  context.fillStyle = SIGNAL;
+  for (let i = 0; i < 8; i++) context.fillRect(-4 + i * 18, -16, 9, 8);
+  context.beginPath();
+  context.arc(150, -4, 5, 0, Math.PI * 2);
+  context.fillStyle = timeMs === 0 || Math.floor(timeMs / 420) % 2 ? ALERT : "#6b735a";
+  context.fill();
+  context.stroke();
+  context.restore();
+}
+
+function drawEscapeAgent(
+  context: CanvasRenderingContext2D, x: number, y: number,
+  sprites: GenerationSprites | "loading" | "error" | undefined,
+  timeMs: number, reducedMotion: boolean,
+): void {
+  if (!sprites || sprites === "loading" || sprites === "error") return;
+  const frameIndex = reducedMotion ? 0 : Math.floor(timeMs / 90) % 8;
+  const rows = spriteFrame(sprites, "right", true, frameIndex, "right").frame.rows;
+  const left = Math.round(x) - 40;
+  const top = Math.round(y) - 75;
+  const pixels: [number, number][] = [];
+  rows.forEach((row, py) => [...row].forEach((pixel, px) => { if (pixel === "#") pixels.push([px, py]); }));
+  context.save();
+  context.beginPath();
+  context.rect(left, top, 80, 80);
+  context.clip();
+  context.fillStyle = "#fff";
+  for (const [px, py] of pixels) context.fillRect(left + px * 5 - 5, top + py * 5 - 5, 15, 15);
+  context.fillStyle = "#000";
+  for (const [px, py] of pixels) context.fillRect(left + px * 5, top + py * 5, 5, 5);
+  context.restore();
 }

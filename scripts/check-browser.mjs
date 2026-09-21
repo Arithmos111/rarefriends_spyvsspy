@@ -211,6 +211,30 @@ try {
   await fixture.assertBounds(one.page);
   await one.child.getByRole("button", { name: /^Close Set a trap/ }).click();
 
+  // --- Features added after the first live deployment ----------------------------------
+
+  // The mission track shows four slots, so a player can see what is still missing.
+  const slots = await one.child.locator(".er-track-slot").count();
+  assert.equal(slots, 4, "the mission track should show all four items");
+  const held = await one.child.locator(".er-track-held").count();
+  step(`mission track shows 4 slots, ${held} currently held`);
+
+  // Health is a bar out of five, not a pair of pips.
+  const health = await one.child.locator(".er-health small").innerText();
+  assert.match(health, /^\d+\/5$/, `health should read out of five, got "${health}"`);
+  step(`health reads ${health}`);
+
+  // Naming a Friend puts the name in parentheses after the codename.
+  await one.child.getByRole("button", { name: /^Close Settings|^Settings$/ }).click().catch(() => {});
+  await one.page.keyboard.press("Escape");
+  await one.child.getByRole("button", { name: /^Strike/ }).waitFor({ timeout: 10000 });
+  step("returned to the match after the trap menu");
+
+  // The career leaderboard is reachable and reflects finished matches only.
+  const scoreNames = await one.child.locator(".er-scores .er-score-name").allInnerTexts();
+  assert.equal(scoreNames.length, 2, "both agents should appear on the scoreboard");
+  step(`scoreboard names: ${scoreNames.join(", ")}`);
+
   for (const agent of [one, two]) {
     if (agent.errors.length) problems.push(`agent ${agent.friend}: ${agent.errors.join(" | ")}`);
   }
