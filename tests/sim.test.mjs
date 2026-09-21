@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const sim = await import("../games/embassy-run/shared/sim.ts");
-const map = await import("../games/embassy-run/shared/mansion.ts");
-const P = await import("../games/embassy-run/shared/protocol.ts");
-const kits = await import("../games/embassy-run/shared/loadouts.ts");
+const sim = await import("../games/rare-agency/shared/sim.ts");
+const map = await import("../games/rare-agency/shared/mansion.ts");
+const P = await import("../games/rare-agency/shared/protocol.ts");
+const kits = await import("../games/rare-agency/shared/loadouts.ts");
 
 const roster = (...entries) => entries.map((entry, index) => ({
   playerId: entry.id, friendId: String(index + 1), codename: entry.id.toUpperCase(),

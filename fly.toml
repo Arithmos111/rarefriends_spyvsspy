@@ -1,4 +1,4 @@
-# Embassy Run on Fly.io.
+# The Rare Agency on Fly.io.
 #
 # One machine, always on. The relay keeps lobbies and live matches in process memory, so a
 # second machine would serve a second, disconnected lobby list, and a machine that stops
@@ -11,7 +11,7 @@
 # Optional, to switch on the Genesis perk once you have the contract address:
 #   fly secrets set RF_GENESIS_ADDRESS=0x...
 
-app = "embassy-run"
+app = "rare-agency"
 primary_region = "iad"
 
 [build]

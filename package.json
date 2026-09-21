@@ -1,8 +1,8 @@
 {
-  "name": "rf-embassy-run",
+  "name": "rf-rare-agency",
   "version": "0.1.0",
   "private": true,
-  "description": "Embassy Run \u2014 a four-player Spy vs Spy-style stealth game built on FriendSDK v0.1",
+  "description": "The Rare Agency \u2014 a four-player Spy vs Spy-style stealth game built on FriendSDK v0.1",
   "type": "module",
   "engines": {
     "node": ">=22.18.0"

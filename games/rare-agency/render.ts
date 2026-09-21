@@ -1067,12 +1067,12 @@ export function drawTitleScreen(
   context.textAlign = "left";
   context.fillStyle = SIGNAL;
   context.font = "800 74px ui-monospace, monospace";
-  context.fillText("EMBASSY", 452, 190);
-  context.fillText("RUN", 452, 262);
+  context.fillText("THE RARE", 452, 190);
+  context.fillText("AGENCY", 452, 262);
   context.strokeStyle = INK;
   context.lineWidth = 2;
-  context.strokeText("EMBASSY", 452, 190);
-  context.strokeText("RUN", 452, 262);
+  context.strokeText("THE RARE", 452, 190);
+  context.strokeText("AGENCY", 452, 262);
 
   context.fillStyle = PAPER;
   context.font = "700 17px ui-monospace, monospace";

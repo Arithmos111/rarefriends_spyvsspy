@@ -87,7 +87,7 @@ try {
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
   await page.getByRole("button", { name: /^Friend #7730\b/ }).click();
   const child = page.frameLocator("iframe");
-  await child.getByText("EMBASSY RUN", { exact: true }).waitFor({ timeout: 25000 });
+  await child.getByText("THE RARE AGENCY", { exact: true }).waitFor({ timeout: 25000 });
   console.log("  game mounted through the proxy");
 
   await child.getByText(/Relay online/).waitFor({ timeout: 20000 });

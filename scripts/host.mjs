@@ -13,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRelay, RELAY_PATH } from "../server/relay.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-export const GAME_DIR = path.join(root, "games/embassy-run");
+export const GAME_DIR = path.join(root, "games/rare-agency");
 export const OUT_DIR = path.join(root, ".build/game");
 
 export async function loadSdkRunner() {
@@ -64,7 +64,7 @@ export function attachRelay(server, { log = console.log } = {}) {
 export function announce({ host, port, mode }) {
   const shown = host === "0.0.0.0" || host === "::" ? "localhost" : host;
   const green = text => `\x1b[38;5;154m${text}\x1b[0m`;
-  console.log(`\n  ${green("EMBASSY RUN")}  ${mode}`);
+  console.log(`\n  ${green("THE RARE AGENCY")}  ${mode}`);
   console.log(`  ${green("→")} this computer   http://${shown}:${port}`);
   if (host === "0.0.0.0" || host === "::") {
     for (const address of lanAddresses()) {

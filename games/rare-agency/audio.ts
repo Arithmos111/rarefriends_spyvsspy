@@ -1,5 +1,5 @@
 /**
- * Chiptune audio for Embassy Run.
+ * Chiptune audio for The Rare Agency.
  *
  * Everything is synthesised at runtime with the Web Audio API: square and triangle
  * oscillators for tones, filtered white noise for percussion. There are no audio files, so

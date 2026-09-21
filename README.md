@@ -1,4 +1,4 @@
-# Embassy Run
+# The Rare Agency
 
 A four-player **Spy vs Spy–style** stealth game for the
 [Rare Friends Vibeathon](https://github.com/spokesz/rarefriends-vibeathon), built on
@@ -16,10 +16,10 @@ bomb. Every finished match feeds a career leaderboard kept per Rare Friend, and 
 your Friend a name that shows in parentheses after your codename.
 
 The game rules, controls, exact economy and known issues are in
-**[games/embassy-run/README.md](games/embassy-run/README.md)**.
+**[games/rare-agency/README.md](games/rare-agency/README.md)**.
 
 The vibeathon entry is drafted at
-[submissions/embassy-run/README.md](submissions/embassy-run/README.md), at the same path the
+[submissions/rare-agency/README.md](submissions/rare-agency/README.md), at the same path the
 submission pull request needs. Its four source links carry a `REPLACE_SHA` placeholder to be
 filled with the submitted commit.
 
@@ -35,7 +35,7 @@ against the real simulation, needing no relay, no lobby and no second player.
 > **Switch your wallet to Robinhood mainnet (chain 4663) before connecting.** On any other
 > network the SDK never queries your holdings, yet still reports "No playable Friends found",
 > which reads like you own nothing. If you hold Friends and the game says you do not, check
-> the network first. See [known issues](games/embassy-run/README.md#known-issues-and-capability-gaps).
+> the network first. See [known issues](games/rare-agency/README.md#known-issues-and-capability-gaps).
 
 ```sh
 npm run setup
@@ -129,7 +129,7 @@ exactly as shipped; the only addition is an upgrade handler on `/relay`.
 scripts/host.mjs        reuses the SDK's buildGame + createGameServer, attaches the relay
 server/relay.mjs        lobbies, matchmaking, and one authoritative match loop at 20 Hz
 server/rpc.mjs          read-only ownerOf / balanceOf, for real-token checks and the Genesis perk
-games/embassy-run/
+games/rare-agency/
   index.tsx             the game component the SDK mounts
   render.ts             isometric canvas renderer, canonical Friend sprites
   net.ts                same-origin relay client with reconnect
@@ -185,7 +185,7 @@ private key is involved. Wallet connection and read-only ownership checks are th
 chain access, and they are the SDK's.
 
 Capability gaps and known issues are listed in
-[games/embassy-run/README.md](games/embassy-run/README.md#known-issues-and-capability-gaps).
+[games/rare-agency/README.md](games/rare-agency/README.md#known-issues-and-capability-gaps).
 
 ## Credits
 

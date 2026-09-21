@@ -11,7 +11,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { normaliseFriendName } from "../games/embassy-run/shared/protocol.ts";
+import { normaliseFriendName } from "../games/rare-agency/shared/protocol.ts";
 
 const DATA_DIR = process.env.RF_DATA_DIR ?? path.join(process.cwd(), "data");
 const FILE = path.join(DATA_DIR, "leaderboard.json");

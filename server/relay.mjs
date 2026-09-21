@@ -11,11 +11,11 @@ import {
   INPUT_HZ, LOBBY_AUTOSTART_MS, LOBBY_IDLE_MS, LOBBY_MAX_PLAYERS, LOBBY_MIN_PLAYERS,
   MATCH_SECONDS, PROTOCOL_VERSION, TICK_MS,
   normaliseFriendName,
-} from "../games/embassy-run/shared/protocol.ts";
-import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "../games/embassy-run/shared/mansion.ts";
-import { isKnownKit, kitById } from "../games/embassy-run/shared/loadouts.ts";
-import { applyAction, applyInput, createMatch, dropPlayer, scoreOf, stepMatch } from "../games/embassy-run/shared/sim.ts";
-import { buildSnapshot as snapshotFor, scoreboardOf } from "../games/embassy-run/shared/view.ts";
+} from "../games/rare-agency/shared/protocol.ts";
+import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "../games/rare-agency/shared/mansion.ts";
+import { isKnownKit, kitById } from "../games/rare-agency/shared/loadouts.ts";
+import { applyAction, applyInput, createMatch, dropPlayer, scoreOf, stepMatch } from "../games/rare-agency/shared/sim.ts";
+import { buildSnapshot as snapshotFor, scoreboardOf } from "../games/rare-agency/shared/view.ts";
 import { holdsGenesis, ownerOfFriend, rpcConfigSummary } from "./rpc.mjs";
 import { createLeaderboard } from "./leaderboard.mjs";
 

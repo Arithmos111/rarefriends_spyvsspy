@@ -1,4 +1,4 @@
-# Embassy Run — build and run the game with its relay in one container.
+# The Rare Agency — build and run the game with its relay in one container.
 #
 # The build stage fetches and builds the pinned FriendSDK commit (it is UNLICENSED, so it is
 # never vendored into this repository) and produces the static bundle. The runtime stage

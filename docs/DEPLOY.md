@@ -1,6 +1,6 @@
-# Deploying Embassy Run
+# Deploying The Rare Agency
 
-Embassy Run needs a long-lived process, not static hosting. The relay holds lobbies and live
+The Rare Agency needs a long-lived process, not static hosting. The relay holds lobbies and live
 matches in memory and talks to players over a WebSocket, and that WebSocket **must share an
 origin with the game page**, because FriendSDK's sandbox allows `connect-src 'self'` and the
 Rare Friends RPC and nothing else. One machine serves both. You cannot put the static files on
@@ -31,7 +31,7 @@ players will visit, pointing at the VPS IPv4 address. Add an `AAAA` record too i
 IPv6. Wait for it to resolve before going further, or certificate issuance will fail:
 
 ```sh
-dig +short embassy.example.com
+dig +short agency.example.com
 ```
 
 **If the domain is on Cloudflare, set the record to "DNS only" (grey cloud) before deploying.**
@@ -167,7 +167,7 @@ expect **five to ten minutes**. Later builds reuse cached layers and are much fa
 ```sh
 docker compose ps                  # both services should be running
 docker compose logs -f caddy       # watch the certificate being issued
-curl -I https://embassy.example.com
+curl -I https://agency.example.com
 ```
 
 Then open the site in a browser with your wallet, connect, select your Friend and create a

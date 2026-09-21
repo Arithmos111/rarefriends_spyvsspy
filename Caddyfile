@@ -1,4 +1,4 @@
-# Automatic HTTPS for Embassy Run.
+# Automatic HTTPS for The Rare Agency.
 #
 # Browser wallets need a secure context and the relay needs wss://, so TLS is not optional
 # here: a bare IP address will not work at all. Caddy obtains and renews a Let's Encrypt

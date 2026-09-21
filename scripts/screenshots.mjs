@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { decodeFunctionData, encodeFunctionResult } from "viem";
 import { attachRelay, GAME_DIR, loadSdkRunner } from "./host.mjs";
-import { project } from "../games/embassy-run/render.ts";
+import { project } from "../games/rare-agency/render.ts";
 
 const outDir = process.argv[2] ?? path.join(fileURLToPath(new URL("..", import.meta.url)), ".build/shots");
 await mkdir(outDir, { recursive: true });
@@ -47,7 +47,7 @@ try {
     if (second) await page.evaluate(() => window.__friendWalletTest.accounts(["0x2222222222222222222222222222222222222222"]));
     await page.getByRole("button", { name: new RegExp(`^Friend #${second ? 3412 : 7730}\\b`) }).click();
     const child = page.frameLocator("iframe");
-    await child.getByText("EMBASSY RUN", { exact: true }).waitFor({ timeout: 20000 });
+    await child.getByText("THE RARE AGENCY", { exact: true }).waitFor({ timeout: 20000 });
     await child.getByText(/Relay online/).waitFor({ timeout: 15000 });
     return { page, child };
   };

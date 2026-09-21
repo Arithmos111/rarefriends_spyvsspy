@@ -16,7 +16,7 @@ const tooOld = MINIMUM.some((least, index) => {
 
 if (tooOld) {
   console.error(
-    `\nEmbassy Run needs Node.js ${MINIMUM.join(".")} or newer, but this is ${process.versions.node}.\n\n` +
+    `\nThe Rare Agency needs Node.js ${MINIMUM.join(".")} or newer, but this is ${process.versions.node}.\n\n` +
     `The server and the browser share one TypeScript simulation, and the server relies on\n` +
     `Node's native type stripping, which older releases do not enable.\n\n` +
     `  nvm install 22 && nvm use 22\n`,

@@ -6,8 +6,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as P from "../games/embassy-run/shared/protocol.ts";
-import * as tut from "../games/embassy-run/tutorial.ts";
+import * as P from "../games/rare-agency/shared/protocol.ts";
+import * as tut from "../games/rare-agency/tutorial.ts";
 
 const TICK = 1000 / P.TICK_HZ;
 

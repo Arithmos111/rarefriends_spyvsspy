@@ -1,10 +1,10 @@
-# Embassy Run — four-player Spy vs Spy
+# The Rare Agency — four-player Spy vs Spy
 
 Up to four Rare Friends raid one embassy for four pieces of hidden intelligence, booby-trapping the furniture and doorways behind them, racing to escape through the courtyard gate before the others.
 
 **Builder:** [@Arithmos111](https://github.com/Arithmos111) · **Category:** Economy Potential · **SDK:** FriendSDK v0.1 (0.1.0)
 
-Your selected Generations Friend is the spy, drawn from its own canonical on-chain sprites, and every rival agent in the room is drawn from theirs. Matchmaking lobbies let dozens of players run separate four-player embassies at once. [Source code](https://github.com/Arithmos111/rarefriends_spyvsspy/tree/REPLACE_SHA) · [Game rules](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/embassy-run/game.json) · [Full rules and controls](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/embassy-run/README.md)
+Your selected Generations Friend is the spy, drawn from its own canonical on-chain sprites, and every rival agent in the room is drawn from theirs. Matchmaking lobbies let dozens of players run separate four-player embassies at once. [Source code](https://github.com/Arithmos111/rarefriends_spyvsspy/tree/REPLACE_SHA) · [Game rules](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/rare-agency/game.json) · [Full rules and controls](https://github.com/Arithmos111/rarefriends_spyvsspy/blob/REPLACE_SHA/games/rare-agency/README.md)
 
 ## Run it
 
@@ -66,7 +66,7 @@ Weights total exactly **10,000 basis points**. Expected reward **0.905 RF per cr
 
 ## Checks, credits and limitations
 
-From an SDK checkout with `games/embassy-run` copied in: `npm test` (111 tests, 109 passed, 2 skipped because Foundry is unavailable), `npm run typecheck` (clean) and `npm run check:games` (`games/embassy-run: valid; expected reward 905000000000000000; maximum 8000000000000000000 RF base units`) all pass. The SDK's `npm run check:browser` passes unchanged.
+From an SDK checkout with `games/rare-agency` copied in: `npm test` (111 tests, 109 passed, 2 skipped because Foundry is unavailable), `npm run typecheck` (clean) and `npm run check:games` (`games/rare-agency: valid; expected reward 905000000000000000; maximum 8000000000000000000 RF base units`) all pass. The SDK's `npm run check:browser` passes unchanged.
 
 This repository additionally runs `npm run check`: typecheck, 23 simulation tests (map determinism, doorways, searching, traps, combat, drops, escaping, the timer, client/server step-for-step agreement, and that every furniture type is reachable from every side), a game validation mirroring the SDK's rule for `games/`, and a browser check that drives **two** real browsers through the SDK ownership gate, buys and opens a crate, creates and joins a lobby, and plays a live match, asserting SDK container bounds at desktop and phone widths. All pass.
 

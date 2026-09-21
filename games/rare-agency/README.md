@@ -1,4 +1,4 @@
-# Embassy Run
+# The Rare Agency
 
 **FriendSDK v0.1 · up to 4 players · simulated RF**
 
@@ -220,7 +220,7 @@ npm run check:game
 npm run check:browser
 ```
 
-This directory is also drop-in valid inside a FriendSDK checkout. Copied to `games/embassy-run`
+This directory is also drop-in valid inside a FriendSDK checkout. Copied to `games/rare-agency`
 there, the SDK's own `npm run check:games` reports it valid, and the SDK's `npm test` (111 tests,
 109 passed, 2 skipped where Foundry is unavailable) and `npm run typecheck` stay clean.
 

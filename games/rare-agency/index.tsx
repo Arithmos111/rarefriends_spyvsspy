@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Embassy Run — a four-player Spy vs Spy-style stealth match for FriendSDK v0.1.
+ * The Rare Agency — a four-player Spy vs Spy-style stealth match for FriendSDK v0.1.
  *
  * The SDK runtime owns wallet connection, owned-Friend discovery and the fresh Generations
  * ownership check; this component only receives the verified friendId, the fixed action
@@ -872,20 +872,20 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   // ---- Screens --------------------------------------------------------------------------
   if (economyError && !economy) {
     return <section className="er-shell er-center" role="alert">
-      <h1>Embassy Run</h1>
+      <h1>The Rare Agency</h1>
       <p>{economyError}</p>
       <button type="button" className="er-primary" disabled={busy || paused} onClick={() => void refreshEconomy()}>Retry</button>
     </section>;
   }
   if (!economy) {
     return <section className="er-shell er-center" role="status">
-      <h1>Embassy Run</h1>
+      <h1>The Rare Agency</h1>
       <p>Opening the diplomatic pouch…</p>
     </section>;
   }
   if (economy.friendId !== friendId) {
     return <section className="er-shell er-center" role="alert">
-      <h1>Embassy Run</h1>
+      <h1>The Rare Agency</h1>
       <p>This session does not match the selected Rare Friend. Reselect your Friend to continue.</p>
     </section>;
   }
@@ -898,7 +898,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   return <section className="er-shell" aria-label={definition.name} aria-busy={busy}>
     {screen !== "match" && <header className="er-top">
       <div className="er-brand">
-        <strong>EMBASSY RUN</strong>
+        <strong>THE RARE AGENCY</strong>
         <span className="er-sim">Simulated RF</span>
       </div>
       <div className="er-status">
@@ -1554,7 +1554,7 @@ function TitleScreen({
 
   return <div className="er-title">
     <canvas ref={ref} width={VIEW_W} height={VIEW_H} className="er-canvas"
-      aria-label={`Embassy Run. Spy versus spy, run by Rare Friends. Playing as ${codename}, Rare Friend number ${friendId}.`} />
+      aria-label={`The Rare Agency. Spy versus spy, run by Rare Friends. Playing as ${codename}, Rare Friend number ${friendId}.`} />
     <div className="er-title-actions">
       <button type="button" className="er-primary" onClick={onStart}>Enter the embassy</button>
       <button type="button" onClick={onTutorial}>Training run</button>

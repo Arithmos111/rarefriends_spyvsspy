@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { decodeFunctionData, encodeFunctionResult } from "viem";
 import { attachRelay, GAME_DIR, loadSdkRunner } from "./host.mjs";
-import { project } from "../games/embassy-run/render.ts";
+import { project } from "../games/rare-agency/render.ts";
 
 const sdkEntry = fileURLToPath(import.meta.resolve("@rarefriends/friendsdk"));
 const sdkRoot = path.dirname(path.dirname(sdkEntry));
@@ -45,7 +45,7 @@ const SECOND_OWNER = "0x2222222222222222222222222222222222222222";
 const problems = [];
 const step = message => console.log(`  · ${message}`);
 
-const directory = await mkdtemp(path.join(tmpdir(), "embassy-run-check-"));
+const directory = await mkdtemp(path.join(tmpdir(), "rare-agency-check-"));
 let build, server, browser;
 try {
   const { buildGame, createGameServer } = await loadSdkRunner();
@@ -76,7 +76,7 @@ try {
     const friend = second ? 3412 : 7730;
     await page.getByRole("button", { name: new RegExp(`^Friend #${friend}\\b`) }).click();
     const child = page.frameLocator("iframe");
-    await child.getByText("EMBASSY RUN", { exact: true }).waitFor({ timeout: 20000 });
+    await child.getByText("THE RARE AGENCY", { exact: true }).waitFor({ timeout: 20000 });
     return { page, context, child, errors, friend };
   }
 
@@ -110,7 +110,7 @@ try {
   await one.child.getByRole("button", { name: "Training run", exact: true })
     .waitFor({ timeout: 15000 });
   const titleLabel = await one.child.locator("canvas.er-canvas").first().getAttribute("aria-label");
-  if (!/Embassy Run/i.test(titleLabel ?? "")) {
+  if (!/The Rare Agency/i.test(titleLabel ?? "")) {
     throw new Error(`title screen should introduce the game, got: ${titleLabel}`);
   }
   step("the title screen introduces the game and the Friend being played");

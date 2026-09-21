@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const gameDir = path.join(root, "games/embassy-run");
+const gameDir = path.join(root, "games/rare-agency");
 const sdkEntry = fileURLToPath(import.meta.resolve("@rarefriends/friendsdk"));
 const sdkRoot = path.dirname(path.dirname(sdkEntry));
 const { parseChanceGame, expectedReward, maximumPrize } = await import(
@@ -73,7 +73,7 @@ const maximum = maximumPrize(definition);
 assert.ok(expected < definition.price, "expected reward must stay below the crate price");
 
 const rf = value => `${(Number(value) / 1e18).toFixed(3)} RF`;
-console.log(`games/embassy-run: valid`);
+console.log(`games/rare-agency: valid`);
 console.log(`  consumable       ${definition.consumable} at ${rf(definition.price)}`);
 console.log(`  outcomes         ${definition.outcomes.length}, weights total ${weights} bps`);
 console.log(`  expected reward  ${rf(expected)} (${(Number(expected) / Number(definition.price) * 100).toFixed(1)}% of price)`);

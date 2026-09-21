@@ -1,4 +1,4 @@
-# Embassy Run on a single VPS, with automatic TLS.
+# The Rare Agency on a single VPS, with automatic TLS.
 #
 #   cp .env.example .env     # set DOMAIN to a name pointing at this machine
 #   docker compose up -d --build
@@ -10,7 +10,7 @@
 services:
   game:
     build: .
-    image: embassy-run:latest
+    image: rare-agency:latest
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
@@ -20,12 +20,15 @@ services:
       # Career standings live here. Keep the volume below or they reset on every redeploy.
       RF_DATA_DIR: /data
     volumes:
+      # Deliberately still named embassy_data. Compose derives the real volume name from
+      # this key, so renaming it would create an empty volume and orphan the career
+      # standings already on any deployed host. The name is cosmetic; the data is not.
       - embassy_data:/data
     # Reachable only from the proxy, never published straight to the internet.
     expose:
       - "8080"
     networks:
-      - embassy
+      - agency
 
   caddy:
     image: caddy:2-alpine
@@ -44,7 +47,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     networks:
-      - embassy
+      - agency
 
 volumes:
   caddy_data:
@@ -53,4 +56,4 @@ volumes:
   embassy_data:
 
 networks:
-  embassy:
+  agency:

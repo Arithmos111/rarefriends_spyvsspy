@@ -1,5 +1,5 @@
 /*
- * Embassy Run styling. Everything lives inside FriendSDK's 960x640 container: the stage
+ * The Rare Agency styling. Everything lives inside FriendSDK's 960x640 container: the stage
  * scales to fit while keeping its 3:2 aspect, and all panels, menus and controls sit on top
  * of it. Nothing escapes the frame, opens a popup or touches the parent page.
  */
