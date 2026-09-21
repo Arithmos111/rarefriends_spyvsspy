@@ -204,32 +204,66 @@ function drawFloor(context: CanvasRenderingContext2D): void {
 const WALL_HEIGHT = 105;
 
 /** A brass plate on the back wall naming the room, so the embassy reads as a building. */
+/**
+ * The room's name, bolted to the wall it hangs on.
+ *
+ * Drawn inside the wall's own plane rather than square to the screen: the plate is sheared to
+ * the wall's rake and sized as a fraction of the wall's length, so it reads as a plaque fixed
+ * to the plaster instead of a label floating in front of it. The text is sheared with it,
+ * which is what sells the surface.
+ */
 function drawRoomSign(context: CanvasRenderingContext2D, name: string, doors: readonly Direction[]): void {
   // Hang it on whichever far wall is not interrupted by a doorway near its middle.
   const onNorth = !doors.includes("north");
-  const [ax, ay] = onNorth ? project(ROOM_W * 0.5, 0) : project(0, ROOM_H * 0.5);
   const label = name.toUpperCase();
+
+  // u runs along the wall in world units and v runs down the plaster in pixels. Each wall
+  // gets the origin and direction that keep the lettering reading left to right.
+  const span = onNorth ? ROOM_W : ROOM_H;
+  const [ox, oy] = onNorth ? project(0, 0) : project(0, ROOM_H);
+
   context.save();
-  context.font = "700 15px ui-monospace, monospace";
-  context.textAlign = "center";
-  const width = Math.max(120, context.measureText(label).width + 30);
-  const top = ay - WALL_HEIGHT + 20;
+  context.translate(ox, oy);
+  context.transform(AX, onNorth ? BY : -BY, 0, 1, 0, 0);
+
+  const plateU = span * 0.52;
+  const midU = span / 2;
+  const height = 34;
+  const top = -WALL_HEIGHT + 20;
+
+  // Size the lettering to the plate rather than the plate to the lettering, so every room's
+  // sign is the same size and sits in the same place.
+  let size = 19;
+  const fit = () => { context.font = `700 ${size}px ui-monospace, monospace`; };
+  fit();
+  while (size > 9 && context.measureText(label).width > plateU - 40) { size -= 1; fit(); }
+
   context.fillStyle = PAPER;
   context.strokeStyle = INK;
   context.lineWidth = 2;
   context.beginPath();
-  context.roundRect(ax - width / 2, top, width, 28, 4);
+  context.rect(midU - plateU / 2, top, plateU, height);
   context.fill();
   context.stroke();
-  // Two fixing screws, which is what sells it as a plate rather than a label.
-  for (const offset of [-width / 2 + 9, width / 2 - 9]) {
-    context.beginPath();
-    context.arc(ax + offset, top + 14, 2.2, 0, Math.PI * 2);
-    context.fillStyle = WALL_DARK;
-    context.fill();
+
+  // An engraved border inset from the edge.
+  context.strokeStyle = "rgba(20,24,15,0.35)";
+  context.lineWidth = 1;
+  context.strokeRect(midU - plateU / 2 + 5, top + 5, plateU - 10, height - 10);
+
+  // Four fixing bolts, which is what sells it as a plate rather than a painted label.
+  context.fillStyle = WALL_DARK;
+  for (const cu of [midU - plateU / 2 + 11, midU + plateU / 2 - 11]) {
+    for (const cv of [top + 9, top + height - 9]) {
+      context.beginPath();
+      context.arc(cu, cv, 2.2, 0, Math.PI * 2);
+      context.fill();
+    }
   }
+
   context.fillStyle = INK;
-  context.fillText(label, ax, top + 19);
+  context.textAlign = "center";
+  context.fillText(label, midU, top + height / 2 + size * 0.36);
   context.restore();
 }
 
