@@ -167,6 +167,36 @@ export const ROOM_FURNITURE: readonly (readonly FurnitureType[])[] = Object.free
   ["table", "painting", "planter", "bookcase", "bench"],    // Great Hall
 ]);
 
+/**
+ * Small objects that sit on top of flat furniture.
+ *
+ * Purely cosmetic and derived from the piece id, so they cost nothing on the wire and both
+ * sides agree without being told. They are what makes a cipher room look like a cipher room
+ * rather than a records vault with different labels.
+ */
+export const PROP_KINDS = [
+  "telephone", "papers", "books", "lamp", "bottles", "radio", "candelabra", "toolbox", "ledger",
+] as const;
+export type PropKind = typeof PROP_KINDS[number];
+
+/** What each room leaves lying about. */
+export const ROOM_PROPS: readonly (readonly PropKind[])[] = Object.freeze([
+  ["telephone", "ledger", "lamp"],        // Reception
+  ["radio", "papers", "lamp"],            // Cipher Room
+  ["books", "lamp", "papers"],            // Ambassador's Study
+  ["ledger", "papers", "books"],          // Records Vault
+  ["toolbox", "lamp", "bottles"],         // Courtyard Gate
+  ["radio", "toolbox", "papers"],         // Signals Room
+  ["toolbox", "bottles", "candelabra"],   // Servants' Stair
+  ["bottles", "candelabra", "toolbox"],   // Wine Cellar
+  ["candelabra", "books", "bottles"],     // Great Hall
+]);
+
+/** Furniture with a flat top wide enough to stand something on. */
+export const PROP_SURFACES: ReadonlySet<FurnitureType> = new Set<FurnitureType>([
+  "desk", "table", "cabinet", "crate", "safe", "console", "barrel", "bookcase",
+]);
+
 /** What hangs on each room's walls. Drawn from separately, at wall anchors. */
 export const ROOM_WALL_FURNITURE: readonly (readonly FurnitureType[])[] = Object.freeze([
   ["wallclock", "wallart"],  // Reception

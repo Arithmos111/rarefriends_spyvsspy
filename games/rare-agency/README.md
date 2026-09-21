@@ -103,6 +103,11 @@ A wall safe behind a portrait is the oldest hiding place in the business. They h
 height so they never block movement, and they are drawn flat against the wall rather than
 sorted among the floor pieces. Banners and flags remain pure decoration.
 
+**Props.** Flat-topped furniture carries something the room would actually have on it: a
+telephone and a ledger in Reception, a radio set in the Signals Room, bottles and a candelabra
+in the Wine Cellar. Props are chosen from the piece's own id, so they cost nothing on the wire
+and both sides agree without being told.
+
 **Furnishing.** Every room is furnished from its own palette, so the twelve kinds of
 furniture tell you where you are: filing cabinets and safes in the Records Vault,
 consoles and lockers in the Signals Room, barrels in the Wine Cellar, tables and

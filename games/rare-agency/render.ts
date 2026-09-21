@@ -11,7 +11,7 @@
 import { spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/sprites";
 import {
   ATTACK_WINDUP_MS, DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FURNITURE_FOOTPRINT, MISSION_ITEMS,
-  ROOM_H, ROOM_W,
+  PROP_SURFACES, ROOM_H, ROOM_PROPS, ROOM_W, type PropKind,
   carryableLabel, isDoorTrapId, isWallMounted,
   type Carryable, type DecorType, type Direction, type EffectKind, type FurnitureType,
   type MatchSnapshot, type RoomActor, type RoomDecor, type RoomTrap,
@@ -146,7 +146,8 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
     const trap = trapByTarget.get(piece.id) ?? null;
     layers.push({
       depth: depthOf(piece.x, piece.y),
-      draw: () => drawFurniture(context, piece, trap, piece.id === input.nearestFurnitureId, timeMs, reducedMotion),
+      draw: () => drawFurniture(context, piece, trap, piece.id === input.nearestFurnitureId,
+        timeMs, reducedMotion, snapshot.roomIndex),
     });
   }
 
@@ -476,8 +477,14 @@ function drawGate(context: CanvasRenderingContext2D, carried: number, timeMs: nu
 }
 
 /** Isometric prism whose base sits on the furniture's world anchor. */
+/**
+ * A box in the room's isometric projection.
+ *
+ * `base` lifts the bottom off the floor, which is what makes a table a table: a slab drawn
+ * from the floor up hides its own legs, so tables and bench seats read as plinths.
+ */
 function isoBox(context: CanvasRenderingContext2D, x: number, y: number, w: number, d: number, height: number,
-  top: string, left: string, right: string): void {
+  top: string, left: string, right: string, base = 0): void {
   const p = (dx: number, dy: number, lift = 0) => {
     const [sx, sy] = project(x + dx, y + dy);
     return [sx, sy - lift] as const;
@@ -485,8 +492,8 @@ function isoBox(context: CanvasRenderingContext2D, x: number, y: number, w: numb
   const hw = w / 2, hd = d / 2;
   const faces: [readonly (readonly [number, number])[], string][] = [
     // Far-left face (+y plane), then near-right face (+x plane), then the lid on top.
-    [[p(-hw, hd, 0), p(hw, hd, 0), p(hw, hd, height), p(-hw, hd, height)], left],
-    [[p(hw, -hd, 0), p(hw, hd, 0), p(hw, hd, height), p(hw, -hd, height)], right],
+    [[p(-hw, hd, base), p(hw, hd, base), p(hw, hd, height), p(-hw, hd, height)], left],
+    [[p(hw, -hd, base), p(hw, hd, base), p(hw, hd, height), p(hw, -hd, height)], right],
     [[p(-hw, -hd, height), p(hw, -hd, height), p(hw, hd, height), p(-hw, hd, height)], top],
   ];
   for (const [points, fill] of faces) {
@@ -562,6 +569,169 @@ function leg(
 }
 
 /**
+ * A small object standing on a piece of furniture.
+ *
+ * Chosen from the room's own list by the piece id, so it is stable, needs no wire traffic and
+ * both sides agree. Props are what give a room its character: the same cabinet reads as a
+ * records vault with a ledger on it and as a signals room with a radio set on it.
+ */
+function drawProp(
+  context: CanvasRenderingContext2D, kind: PropKind, x: number, y: number, lift: number,
+): void {
+  const [sx, sy] = project(x, y);
+  const baseY = sy - lift;
+  context.save();
+  context.strokeStyle = INK;
+  context.lineWidth = 1.5;
+  context.lineJoin = "round";
+
+  switch (kind) {
+    case "telephone": {
+      context.fillStyle = "#2b3220";
+      context.fillRect(sx - 10, baseY - 7, 20, 7);
+      context.strokeRect(sx - 10, baseY - 7, 20, 7);
+      context.beginPath();
+      context.moveTo(sx - 11, baseY - 10);
+      context.quadraticCurveTo(sx, baseY - 17, sx + 11, baseY - 10);
+      context.lineWidth = 3.5;
+      context.stroke();
+      break;
+    }
+    case "papers": {
+      context.fillStyle = PAPER;
+      for (const [ox, oy, angle] of [[-5, 0, -0.16], [4, -2, 0.12]] as const) {
+        context.save();
+        context.translate(sx + ox, baseY + oy);
+        context.rotate(angle);
+        context.fillRect(-9, -11, 18, 11);
+        context.strokeRect(-9, -11, 18, 11);
+        context.restore();
+      }
+      break;
+    }
+    case "books": {
+      const spines = ["#8d967a", PAPER, "#2b3220", "#8d967a"];
+      spines.forEach((fill, index) => {
+        const h = 13 + (index % 2) * 4;
+        context.fillStyle = fill;
+        context.fillRect(sx - 14 + index * 7, baseY - h, 6, h);
+        context.strokeRect(sx - 14 + index * 7, baseY - h, 6, h);
+      });
+      break;
+    }
+    case "lamp": {
+      context.fillStyle = "#2b3220";
+      context.fillRect(sx - 2, baseY - 16, 4, 16);
+      context.stroke();
+      context.fillStyle = "#e8c547";
+      context.beginPath();
+      context.moveTo(sx - 11, baseY - 16);
+      context.lineTo(sx + 11, baseY - 16);
+      context.lineTo(sx + 7, baseY - 27);
+      context.lineTo(sx - 7, baseY - 27);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      break;
+    }
+    case "bottles": {
+      [[-8, 1], [0, 1.15], [8, 0.9]].forEach(([ox, scale]) => {
+        const h = 18 * scale;
+        context.fillStyle = "#4f6b3a";
+        context.beginPath();
+        context.moveTo(sx + ox - 4, baseY);
+        context.lineTo(sx + ox - 4, baseY - h * 0.55);
+        context.lineTo(sx + ox - 1.5, baseY - h * 0.78);
+        context.lineTo(sx + ox - 1.5, baseY - h);
+        context.lineTo(sx + ox + 1.5, baseY - h);
+        context.lineTo(sx + ox + 1.5, baseY - h * 0.78);
+        context.lineTo(sx + ox + 4, baseY - h * 0.55);
+        context.lineTo(sx + ox + 4, baseY);
+        context.closePath();
+        context.fill();
+        context.stroke();
+      });
+      break;
+    }
+    case "radio": {
+      context.fillStyle = "#2b3220";
+      context.fillRect(sx - 14, baseY - 15, 28, 15);
+      context.strokeRect(sx - 14, baseY - 15, 28, 15);
+      context.fillStyle = SIGNAL;
+      context.fillRect(sx - 10, baseY - 12, 11, 6);
+      context.strokeStyle = INK;
+      context.beginPath();
+      context.arc(sx + 8, baseY - 8, 3, 0, Math.PI * 2);
+      context.stroke();
+      // Whip aerial.
+      context.beginPath();
+      context.moveTo(sx + 12, baseY - 15);
+      context.lineTo(sx + 16, baseY - 31);
+      context.stroke();
+      break;
+    }
+    case "candelabra": {
+      context.strokeStyle = INK;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(sx, baseY);
+      context.lineTo(sx, baseY - 12);
+      context.moveTo(sx - 9, baseY - 12);
+      context.lineTo(sx + 9, baseY - 12);
+      context.stroke();
+      for (const ox of [-9, 0, 9]) {
+        context.fillStyle = PAPER;
+        context.fillRect(sx + ox - 2, baseY - 24, 4, 12);
+        context.strokeRect(sx + ox - 2, baseY - 24, 4, 12);
+        context.fillStyle = "#e8c547";
+        context.beginPath();
+        context.ellipse(sx + ox, baseY - 27, 2.5, 4, 0, 0, Math.PI * 2);
+        context.fill();
+      }
+      break;
+    }
+    case "toolbox": {
+      context.fillStyle = ALERT;
+      context.fillRect(sx - 13, baseY - 10, 26, 10);
+      context.strokeRect(sx - 13, baseY - 10, 26, 10);
+      context.strokeStyle = INK;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(sx - 6, baseY - 10);
+      context.quadraticCurveTo(sx, baseY - 19, sx + 6, baseY - 10);
+      context.stroke();
+      break;
+    }
+    case "ledger": {
+      context.save();
+      context.translate(sx, baseY);
+      context.rotate(-0.1);
+      context.fillStyle = "#6b5330";
+      context.fillRect(-13, -9, 26, 9);
+      context.strokeRect(-13, -9, 26, 9);
+      context.fillStyle = PAPER;
+      context.fillRect(-11, -12, 22, 4);
+      context.strokeRect(-11, -12, 22, 4);
+      context.restore();
+      break;
+    }
+  }
+  context.restore();
+}
+
+/** The prop this piece carries, or null when nothing stands on that kind of furniture. */
+function propFor(
+  roomIndex: number, piece: MatchSnapshot["furniture"][number],
+): PropKind | null {
+  if (!PROP_SURFACES.has(piece.type)) return null;
+  const list = ROOM_PROPS[roomIndex];
+  if (!list?.length) return null;
+  // Only about two thirds of eligible pieces carry anything, or a room looks like a jumble.
+  if (piece.id % 3 === 2) return null;
+  return list[Math.floor(piece.id / 3) % list.length];
+}
+
+/**
  * Furniture, drawn per type rather than as one box with a decal.
  *
  * Each room is furnished from its own palette (see ROOM_FURNITURE), so the silhouettes are
@@ -577,6 +747,7 @@ function drawFurniture(
   highlighted: boolean,
   timeMs: number,
   reducedMotion: boolean,
+  roomIndex: number,
 ): void {
   const { w, h } = FURNITURE_FOOTPRINT[piece.type];
   const height = FURNITURE_HEIGHT[piece.type];
@@ -706,7 +877,8 @@ function drawFurniture(
         "right", 0.15, 0.85, 0.55, 0.85, null);
       faceLine(context, x + w * 0.22, y, w * 0.4, h * 0.82, height - topThickness,
         "right", 0.4, 0.6, 0.7, 3);
-      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right,
+        height - topThickness);
       // A blotter and a couple of loose papers, so the top is not a blank slab.
       context.save();
       const [bx, by] = project(x - w * 0.14, y);
@@ -733,39 +905,45 @@ function drawFurniture(
       ] as const) {
         leg(context, x + lx, y + ly, legHeight, shade.right);
       }
-      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
-      facePanel(context, x, y, w, h, height, "right", 0, 1,
-        (height - topThickness) / height, 1, null, INK, 1.5);
+      // The top is a slab resting on the legs, not a box grown from the floor, so the legs
+      // and the daylight between them are visible.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right, legHeight);
       break;
     }
     case "bench": {
-      // A seat slab on legs with a slatted backrest along its far edge.
-      const seat = 5;
-      for (const lx of [-w * 0.38, w * 0.38]) {
-        leg(context, x + lx, y + h * 0.26, height - seat, shade.right);
-        leg(context, x + lx, y - h * 0.26, height - seat, shade.right);
+      // Backless, with four chunky legs and raised ends.
+      //
+      // Earlier versions gave it a back. A bench back is a thin vertical plane, and in this
+      // projection a thin vertical plane fills a large quad on screen whatever you do to it:
+      // rails merged, slats merged, and it read as a room divider every time. Taking the back
+      // off removes the ambiguity entirely — the silhouette is now unmistakably something you
+      // sit on.
+      const seat = 7;
+      const legHeight = height - seat;
+      for (const [lx, ly] of [
+        [-w * 0.38, -h * 0.26], [w * 0.38, -h * 0.26],
+        [-w * 0.38, h * 0.26], [w * 0.38, h * 0.26],
+      ] as const) {
+        leg(context, x + lx, y + ly, legHeight, shade.right);
       }
-      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
-      // Slats across the seat, so the top is not a blank plank.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right, legHeight);
+      // Raised ends, low enough that they read as arms rather than as walls.
+      for (const px of [-w * 0.44, w * 0.44]) {
+        isoBox(context, x + px, y, 9, h * 0.86, height + 11, shade.top, "#7c866a", shade.right);
+      }
+      // Planks along the seat, drawn on the top face.
       context.save();
-      context.strokeStyle = "rgba(20,24,15,0.4)";
+      context.strokeStyle = "rgba(20,24,15,0.42)";
       context.lineWidth = 1.5;
-      for (const across of [-0.2, 0.2]) {
-        const [ax, ay] = project(x + w * across, y - h / 2);
-        const [bx, by] = project(x + w * across, y + h / 2);
+      for (const across of [-0.16, 0.16]) {
+        const [ax, ay] = project(x - w * 0.36, y + h * across);
+        const [bx, by] = project(x + w * 0.36, y + h * across);
         context.beginPath();
         context.moveTo(ax, ay - height);
         context.lineTo(bx, by - height);
         context.stroke();
       }
       context.restore();
-      // A single back rail on two posts. Two rails close together merged into a panel and
-      // read as a room divider rather than something you sit on.
-      for (const px of [-w * 0.42, w * 0.42]) {
-        isoBox(context, x + px, y - h * 0.38, 5, 5, height + 20, shade.top, "#7c866a", shade.right);
-      }
-      isoBox(context, x, y - h * 0.38, w * 0.84, 3, height + 18,
-        shade.top, shade.left, shade.right);
       break;
     }
     case "barrel": {
@@ -872,6 +1050,10 @@ function drawFurniture(
     }
   }
   context.restore();
+
+  // Whatever the room leaves lying about, standing on the top surface.
+  const prop = propFor(roomIndex, piece);
+  if (prop) drawProp(context, prop, piece.x, piece.y - FURNITURE_FOOTPRINT[piece.type].h * 0.1, height);
 
   if (piece.emptied) {
     context.fillStyle = "rgba(20, 24, 15, 0.45)";
