@@ -38,6 +38,8 @@ export type Lesson = Readonly<{
   body: string;
   /** Staging applied once, when the lesson begins. */
   enter?: (state: TutorialState) => void;
+  /** Run every tick while this lesson is current, to keep its objective reachable. */
+  tick?: (state: TutorialState) => void;
   /** True once the trainee has done the thing. */
   done: (state: TutorialState) => boolean;
 }>;
@@ -81,14 +83,21 @@ export function nearestFurniture(state: TutorialState) {
   return pick(room.furniture.filter(piece => !piece.searched)) ?? pick(room.furniture);
 }
 
-/** Put the trainee beside a piece of furniture in their room, ready to act on it. */
-function standByFurniture(state: TutorialState): void {
+/**
+ * Make sure the documents are somewhere the trainee can actually reach: the nearest unsearched
+ * piece in whatever room they are currently standing in. Re-checked as they move, so walking
+ * out of the room mid-lesson moves the objective with them rather than stranding it.
+ */
+function seedDocuments(state: TutorialState): void {
   const self = trainee(state);
+  const already = state.sim.map.rooms[self.room].furniture
+    .some(piece => piece.contents === "documents" && !piece.emptied);
+  if (already) return;
   const piece = nearestFurniture(state);
-  if (!piece) return;
-  self.x = Math.min(ROOM_W - 40, Math.max(40, piece.x));
-  self.y = Math.min(ROOM_H - 40, Math.max(40, piece.y + 46));
-  self.busy = null;
+  if (!piece || piece.contents) return;
+  piece.contents = "documents";
+  piece.searched = false;
+  piece.emptied = false;
 }
 
 export const LESSONS: readonly Lesson[] = Object.freeze([
@@ -107,32 +116,29 @@ export const LESSONS: readonly Lesson[] = Object.freeze([
   {
     id: "search",
     title: "Search",
-    body: "Everything worth having is hidden inside the furniture. Stand against a piece and press E, space or the action button to search it.",
-    enter: standByFurniture,
+    body: "Everything worth having is hidden inside the furniture. Walk up to any piece, then press E, space or the action button to search it.",
     done: state => state.searches > 0,
   },
   {
     id: "collect",
     title: "Take the intelligence",
-    body: "Four items win the match: the documents, the passport, the bonds and the disguise. One is in the furniture beside you. Search it.",
+    body: "Four items win the match: the documents, the passport, the bonds and the disguise. The documents are in this room. Keep searching until you find them.",
     enter: state => {
-      standByFurniture(state);
       const self = trainee(state);
       // Start this lesson empty-handed, or a mission item turned up by the searching lesson
       // would clear it before the trainee has picked anything up on purpose.
       self.inventory = [];
       self.itemsFound = 0;
-      const piece = nearestFurniture(state);
-      if (piece) { piece.contents = "documents"; piece.searched = false; piece.emptied = false; }
+      seedDocuments(state);
     },
+    tick: seedDocuments,
     done: state => trainee(state).inventory.length > 0,
   },
   {
     id: "trap",
     title: "Set a trap",
-    body: "Press Q, or the trap button, and pick one. A trap on a searched cabinet catches whoever comes looking. Set one now.",
+    body: "Press Q, or the trap button, and pick one. A trap on a searched cabinet catches whoever comes looking. Walk up to a piece and set one.",
     enter: state => {
-      standByFurniture(state);
       const self = trainee(state);
       for (const type of ["bomb", "spring", "bucket"] as TrapType[]) self.traps[type] = 2;
     },
@@ -236,6 +242,7 @@ export function stepTutorial(state: TutorialState, deltaMs: number, dx: number, 
     lesson.enter?.(state);
   }
   state.shownMs += deltaMs;
+  lesson?.tick?.(state);
 
   const self = trainee(state);
   const beforeX = self.x;

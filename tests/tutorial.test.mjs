@@ -18,6 +18,21 @@ function hold(state, ms, dx = 0, dy = 0) {
 
 const self = state => state.sim.players.get(tut.TRAINEE);
 
+/**
+ * Put the trainee against the nearest piece of furniture, the way walking there would.
+ * Lessons no longer move the player themselves, so the walk is the test's job; steering
+ * around furniture without pathfinding is not what these tests are checking.
+ */
+function standAtNearest(state) {
+  const agent = self(state);
+  const piece = tut.nearestFurniture(state);
+  if (!piece) return null;
+  agent.x = Math.min(P.ROOM_W - 40, Math.max(40, piece.x));
+  agent.y = Math.min(P.ROOM_H - 40, Math.max(40, piece.y + 46));
+  agent.busy = null;
+  return piece;
+}
+
 test("every lesson is reachable and the run can be completed", () => {
   const state = tut.startTutorial(0);
   const cleared = [];
@@ -47,15 +62,15 @@ test("every lesson is reachable and the run can be completed", () => {
       case "search":
       case "collect": {
         hold(state, tut.LESSON_DWELL_MS);
-        const piece = tut.nearestFurniture(state);
-        assert.ok(piece, "the lesson should have staged a piece of furniture");
+        const piece = standAtNearest(state);
+        assert.ok(piece, "the trainee's room should contain furniture to search");
         tut.tutorialAction(state, { kind: "search", furnitureId: piece.id });
         hold(state, P.SEARCH_MS + 300);
         break;
       }
       case "trap": {
         hold(state, tut.LESSON_DWELL_MS);
-        const piece = tut.nearestFurniture(state);
+        const piece = standAtNearest(state);
         tut.tutorialAction(state, { kind: "plant", targetId: piece.id, trap: "bomb" });
         hold(state, P.PLANT_MS + 300);
         break;

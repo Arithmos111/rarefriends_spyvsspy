@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -111,18 +111,46 @@ export const TRAP_IS_LETHAL: Readonly<Record<TrapType, boolean>> = Object.freeze
   bomb: true, spring: true, bucket: false,
 });
 
-export const FURNITURE_TYPES = ["safe", "desk", "cabinet", "crate", "locker", "console", "planter", "painting"] as const;
+export const FURNITURE_TYPES = [
+  "safe", "desk", "cabinet", "crate", "locker", "console", "planter", "painting",
+  "table", "bookcase", "barrel", "bench",
+] as const;
 export type FurnitureType = typeof FURNITURE_TYPES[number];
 export const FURNITURE_LABELS: Readonly<Record<FurnitureType, string>> = Object.freeze({
   safe: "Wall safe", desk: "Writing desk", cabinet: "Filing cabinet", crate: "Supply crate",
   locker: "Steel locker", console: "Comms console", planter: "Planter", painting: "Framed painting",
+  table: "Meeting table", bookcase: "Bookcase", barrel: "Wine barrel", bench: "Bench",
 });
 
-/** World-space collision footprint per furniture type, centred on its anchor. */
+/**
+ * World-space collision footprint per furniture type, centred on its anchor.
+ *
+ * Nothing here may be wider or deeper than INTERACT_RANGE * 2 - PLAYER_RADIUS * 2, or an
+ * agent could stand against its long side and still be out of reach; tests/sim.test.mjs
+ * checks that for every type.
+ */
 export const FURNITURE_FOOTPRINT: Readonly<Record<FurnitureType, Readonly<{ w: number; h: number }>>> = Object.freeze({
   safe: { w: 52, h: 40 }, desk: { w: 82, h: 50 }, cabinet: { w: 54, h: 44 }, crate: { w: 58, h: 58 },
   locker: { w: 50, h: 42 }, console: { w: 74, h: 46 }, planter: { w: 46, h: 46 }, painting: { w: 60, h: 26 },
+  table: { w: 86, h: 58 }, bookcase: { w: 66, h: 38 }, barrel: { w: 48, h: 48 }, bench: { w: 76, h: 34 },
 });
+
+/**
+ * What each room is furnished with, by room index, matching ROOM_NAMES below. A records
+ * vault full of planters reads as noise, so every room draws only from furniture that
+ * belongs in it. Both sides derive furniture from the seed, so this must stay deterministic.
+ */
+export const ROOM_FURNITURE: readonly (readonly FurnitureType[])[] = Object.freeze([
+  ["desk", "cabinet", "bench", "planter", "table"],        // Reception
+  ["console", "cabinet", "safe", "locker", "desk"],         // Cipher Room
+  ["desk", "bookcase", "safe", "painting", "cabinet"],      // Ambassador's Study
+  ["cabinet", "locker", "safe", "crate", "bookcase"],       // Records Vault
+  ["planter", "crate", "bench", "barrel", "table"],         // Courtyard Gate
+  ["console", "locker", "cabinet", "crate", "desk"],        // Signals Room
+  ["crate", "locker", "bench", "cabinet", "barrel"],        // Servants' Stair
+  ["barrel", "crate", "bookcase", "locker", "bench"],       // Wine Cellar
+  ["table", "painting", "planter", "bookcase", "bench"],    // Great Hall
+]);
 
 /** Purely decorative room dressing. Drawn from the map seed, never collidable. */
 export const DECOR_TYPES = ["rug", "portrait", "banner", "lamp", "clock", "bookshelf", "flag"] as const;

@@ -8,7 +8,7 @@
  */
 import {
   DECOR_TYPES, FURNITURE_FOOTPRINT, FURNITURE_TYPES, GRID_W, MISSION_ITEMS, PLAYER_RADIUS,
-  ROOM_COUNT, ROOM_H, ROOM_NAMES, ROOM_W, roomDoors,
+  ROOM_COUNT, ROOM_FURNITURE, ROOM_H, ROOM_NAMES, ROOM_W, roomDoors,
   type Carryable, type DecorType, type Direction, type FurnitureType, type RoomDecor,
 } from "./protocol.ts";
 
@@ -66,17 +66,42 @@ const FLOOR_SPOTS: readonly (readonly [number, number])[] = Object.freeze([
 const WALL_DECOR: readonly DecorType[] = Object.freeze(["portrait", "banner", "clock", "flag"]);
 const FLOOR_DECOR: readonly DecorType[] = Object.freeze(["rug", "lamp", "bookshelf"]);
 
-function decorFor(random: () => number): RoomDecor[] {
+/**
+ * Wall anchors far enough from the room name plate to leave it readable.
+ *
+ * The plate hangs at the middle of whichever far wall has no doorway, which is exactly where
+ * some of these anchors sit. Screen separation along a wall is AX * the world distance, so a
+ * clearance of 130 world units keeps even the longest room name clear of a hanging.
+ */
+const SIGN_CLEARANCE = 130;
+function wallSpotsClearOfSign(doors: readonly Direction[]): readonly number[] {
+  const onNorth = !doors.includes("north");
+  return WALL_SPOTS.map((_, index) => index).filter(index => {
+    const [x, y] = WALL_SPOTS[index];
+    // The plate is centred on the wall it hangs on; measure along that wall only.
+    return onNorth
+      ? y !== 0 || Math.abs(x - ROOM_W / 2) >= SIGN_CLEARANCE
+      : x !== 0 || Math.abs(y - ROOM_H / 2) >= SIGN_CLEARANCE;
+  });
+}
+
+function decorFor(random: () => number, doors: readonly Direction[]): RoomDecor[] {
   const decor: RoomDecor[] = [];
-  const wallOrder = WALL_SPOTS.map((_, index) => index);
+  const wallOrder = wallSpotsClearOfSign(doors).slice();
   for (let i = wallOrder.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [wallOrder[i], wallOrder[j]] = [wallOrder[j], wallOrder[i]];
   }
-  for (const slot of wallOrder.slice(0, 2 + Math.floor(random() * 2))) {
-    const [x, y] = WALL_SPOTS[slot];
-    decor.push({ type: WALL_DECOR[Math.floor(random() * WALL_DECOR.length)], x, y, variant: Math.floor(random() * 4) });
+  // Distinct kinds per room: two identical clocks on one wall looks like a mistake.
+  const wallKinds = WALL_DECOR.slice();
+  for (let i = wallKinds.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [wallKinds[i], wallKinds[j]] = [wallKinds[j], wallKinds[i]];
   }
+  wallOrder.slice(0, 2 + Math.floor(random() * 2)).forEach((slot, pick) => {
+    const [x, y] = WALL_SPOTS[slot];
+    decor.push({ type: wallKinds[pick % wallKinds.length], x, y, variant: Math.floor(random() * 4) });
+  });
   const floorOrder = FLOOR_SPOTS.map((_, index) => index);
   for (let i = floorOrder.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
@@ -87,6 +112,17 @@ function decorFor(random: () => number): RoomDecor[] {
     decor.push({ type: FLOOR_DECOR[Math.floor(random() * FLOOR_DECOR.length)], x, y, variant: Math.floor(random() * 4) });
   }
   return decor;
+}
+
+/** Clearance between two pieces of furniture, so they never touch, let alone interpenetrate. */
+const FURNITURE_GAP = 8;
+
+/** True when a piece of `type` at (x, y) would clip a piece already placed. */
+function overlaps(type: FurnitureType, x: number, y: number, other: Furniture): boolean {
+  const a = FURNITURE_FOOTPRINT[type];
+  const b = FURNITURE_FOOTPRINT[other.type];
+  return Math.abs(x - other.x) < (a.w + b.w) / 2 + FURNITURE_GAP
+    && Math.abs(y - other.y) < (a.h + b.h) / 2 + FURNITURE_GAP;
 }
 
 export function createMap(seed: number): EmbassyMap {
@@ -100,14 +136,39 @@ export function createMap(seed: number): EmbassyMap {
       [order[i], order[j]] = [order[j], order[i]];
     }
     const count = 5;
-    const furniture: Furniture[] = order.slice(0, count).map(slot => {
-      const type = FURNITURE_TYPES[Math.floor(random() * FURNITURE_TYPES.length)];
+    // Each room furnishes itself from its own palette, shuffled so the same five pieces do
+    // not appear in the same order every time.
+    const palette = ROOM_FURNITURE[index] ?? FURNITURE_TYPES;
+    const kinds = palette.slice();
+    for (let i = kinds.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
+    }
+
+    // Walk the shuffled slots and take the first kind that fits without clipping anything
+    // already placed. Desks, tables and benches are wide enough that two adjacent slots can
+    // no longer hold any two pieces, and solid furniture growing through solid furniture
+    // reads as a rendering fault rather than a room.
+    const furniture: Furniture[] = [];
+    const used = new Set<FurnitureType>();
+    for (const slot of order) {
+      if (furniture.length >= count) break;
       const [x, y] = SLOTS[slot];
-      return { id: index * 100 + slot, slot, type, x, y, contents: null, searched: false, emptied: false };
-    }).sort((a, b) => a.id - b.id);
+      // Kinds not yet in this room come first, so a room only repeats itself once its whole
+      // palette is either placed or blocked by what is already standing there.
+      const choices = [...kinds.filter(kind => !used.has(kind)), ...kinds];
+      const type = choices.find(kind => !furniture.some(other => overlaps(kind, x, y, other)));
+      if (!type) continue;
+      used.add(type);
+      furniture.push({
+        id: index * 100 + slot, slot, type, x, y,
+        contents: null, searched: false, emptied: false,
+      });
+    }
+    furniture.sort((a, b) => a.id - b.id);
     rooms.push({
       index, name: ROOM_NAMES[index] ?? `Room ${index + 1}`, doors: roomDoors(index),
-      furniture, decor: Object.freeze(decorFor(random)),
+      furniture, decor: Object.freeze(decorFor(random, roomDoors(index))),
     });
   }
   return { seed, rooms, exitRoom: EXIT_ROOM };

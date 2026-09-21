@@ -82,8 +82,11 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
   drawFloor(context);
   drawFloorDecor(context, input.decor);
   drawWalls(context, snapshot.doors);
-  drawRoomSign(context, snapshot.roomName, snapshot.doors);
   drawWallDecor(context, input.decor);
+  // The name plate is drawn after the dressing, so a hanging can never cover it. Decor
+  // anchors near the plate are also excluded when the map is generated; this is the belt to
+  // that pair of braces.
+  drawRoomSign(context, snapshot.roomName, snapshot.doors);
   for (const direction of snapshot.doors) {
     drawDoorway(context, direction, timeMs, reducedMotion, direction === input.nearestDoor);
   }
@@ -433,7 +436,374 @@ function isoBox(context: CanvasRenderingContext2D, x: number, y: number, w: numb
 
 const FURNITURE_HEIGHT: Record<FurnitureType, number> = {
   safe: 48, desk: 34, cabinet: 62, crate: 50, locker: 70, console: 40, planter: 54, painting: 52,
+  table: 32, bookcase: 74, barrel: 46, bench: 26,
 };
+
+/** Shades shared by every carcass, dimmed once a piece has been turned out. */
+function carcass(emptied: boolean) {
+  return emptied
+    ? { top: "#aab394", left: "#8d967a", right: "#c3cbb0" }
+    : { top: "#dfe4d2", left: "#959e80", right: PAPER };
+}
+
+/**
+ * A rectangle painted onto one of a box's two visible faces.
+ *
+ * `u` runs across the face (0 to 1) and `v` up it (0 at the floor, 1 at `height`), so drawer
+ * fronts, shelves, vents and screens can be placed in the face's own terms rather than
+ * reverse-engineered from screen coordinates.
+ */
+function facePanel(
+  context: CanvasRenderingContext2D,
+  x: number, y: number, w: number, d: number, height: number,
+  face: "right" | "left",
+  u0: number, u1: number, v0: number, v1: number,
+  fill: string | null, stroke = INK, lineWidth = 2,
+): void {
+  const hw = w / 2, hd = d / 2;
+  const at = (u: number, v: number) => {
+    const [sx, sy] = face === "right"
+      ? project(x + hw, y - hd + u * d)
+      : project(x - hw + u * w, y + hd);
+    return [sx, sy - v * height] as const;
+  };
+  const corners = [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
+  context.beginPath();
+  corners.forEach(([px, py], index) => index === 0 ? context.moveTo(px, py) : context.lineTo(px, py));
+  context.closePath();
+  if (fill) { context.fillStyle = fill; context.fill(); }
+  if (stroke) { context.strokeStyle = stroke; context.lineWidth = lineWidth; context.stroke(); }
+}
+
+/** A short line across a face, for handles, shelf edges and vent slats. */
+function faceLine(
+  context: CanvasRenderingContext2D,
+  x: number, y: number, w: number, d: number, height: number,
+  face: "right" | "left",
+  u0: number, u1: number, v: number, lineWidth = 2,
+): void {
+  facePanel(context, x, y, w, d, height, face, u0, u1, v, v, null, INK, lineWidth);
+}
+
+/** An upright leg, drawn as a thin box so it sits in the same projection as everything else. */
+function leg(
+  context: CanvasRenderingContext2D, x: number, y: number, height: number, shade: string,
+): void {
+  isoBox(context, x, y, 8, 8, height, shade, "#7c866a", shade);
+}
+
+/**
+ * Furniture, drawn per type rather than as one box with a decal.
+ *
+ * Each room is furnished from its own palette (see ROOM_FURNITURE), so the silhouettes are
+ * what tell a records vault from a wine cellar at a glance. Box-shaped pieces share the
+ * isometric carcass and differ in what is painted on their faces; the pieces that are not
+ * box-shaped — tables, benches, barrels, planters, leaning paintings — are built from their
+ * own geometry, because a decal on a cube still reads as a cube.
+ */
+function drawFurniture(
+  context: CanvasRenderingContext2D,
+  piece: MatchSnapshot["furniture"][number],
+  trap: RoomTrap | null,
+  highlighted: boolean,
+  timeMs: number,
+  reducedMotion: boolean,
+): void {
+  const { w, h } = FURNITURE_FOOTPRINT[piece.type];
+  const height = FURNITURE_HEIGHT[piece.type];
+  const shade = carcass(piece.emptied);
+  const [sx, sy] = project(piece.x, piece.y);
+  const { x, y } = piece;
+
+  context.save();
+  switch (piece.type) {
+    case "cabinet": {
+      // Three drawers with pull handles: the office silhouette people know instantly.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      for (let drawer = 0; drawer < 3; drawer++) {
+        const v0 = 0.08 + drawer * 0.3;
+        facePanel(context, x, y, w, h, height, "right", 0.12, 0.88, v0, v0 + 0.24, null);
+        faceLine(context, x, y, w, h, height, "right", 0.38, 0.62, v0 + 0.12, 3);
+      }
+      break;
+    }
+    case "locker": {
+      // Tall and narrow, vented at the top, with one full-height door seam and a handle.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      facePanel(context, x, y, w, h, height, "right", 0.1, 0.9, 0.06, 0.94, null);
+      for (let slat = 0; slat < 4; slat++) {
+        faceLine(context, x, y, w, h, height, "right", 0.25, 0.75, 0.74 + slat * 0.05, 1.5);
+      }
+      faceLine(context, x, y, w, h, height, "right", 0.76, 0.84, 0.45, 3);
+      break;
+    }
+    case "safe": {
+      // Squat and heavy, with a combination dial and two hinges.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      facePanel(context, x, y, w, h, height, "right", 0.14, 0.86, 0.12, 0.88, null);
+      const [dx, dy] = project(x + w / 2, y);
+      context.save();
+      context.strokeStyle = INK;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(dx, dy - height * 0.5, 7, 0, Math.PI * 2);
+      context.stroke();
+      for (let spoke = 0; spoke < 4; spoke++) {
+        const angle = spoke * Math.PI / 2 + 0.4;
+        context.beginPath();
+        context.moveTo(dx + Math.cos(angle) * 3, dy - height * 0.5 + Math.sin(angle) * 3);
+        context.lineTo(dx + Math.cos(angle) * 9, dy - height * 0.5 + Math.sin(angle) * 9);
+        context.stroke();
+      }
+      context.restore();
+      for (const v of [0.25, 0.7]) faceLine(context, x, y, w, h, height, "right", 0.06, 0.13, v, 3);
+      break;
+    }
+    case "bookcase": {
+      // Open shelving: four shelves of book spines, which also dates the room as a study.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      facePanel(context, x, y, w, h, height, "right", 0.08, 0.92, 0.06, 0.94,
+        piece.emptied ? "#9aa384" : "#c7cfb4");
+      for (let shelf = 0; shelf < 4; shelf++) {
+        const base = 0.1 + shelf * 0.21;
+        faceLine(context, x, y, w, h, height, "right", 0.08, 0.92, base, 2);
+        // Spines of varying height, seeded off the piece id so a shelf never flickers.
+        for (let book = 0; book < 6; book++) {
+          const u = 0.14 + book * 0.12;
+          const tall = ((piece.id * 7 + shelf * 13 + book * 3) % 5) / 40;
+          facePanel(context, x, y, w, h, height, "right", u, u + 0.08, base, base + 0.12 + tall,
+            (book + shelf) % 2 ? PAPER : "#8d967a", INK, 1);
+        }
+      }
+      break;
+    }
+    case "console": {
+      // A raked operator panel with a screen and two dials.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      facePanel(context, x, y, w, h, height, "right", 0.1, 0.62, 0.3, 0.86,
+        piece.emptied ? "#6f775f" : "#3c4530", INK, 2);
+      const [px, py] = project(x + w / 2, y + h * 0.28);
+      context.save();
+      context.fillStyle = piece.emptied ? "#8d967a" : SIGNAL;
+      for (let bar = 0; bar < 3; bar++) {
+        context.fillRect(px - 12, py - height * 0.72 + bar * 7, 7 + bar * 5, 3);
+      }
+      context.strokeStyle = INK;
+      context.lineWidth = 2;
+      for (const offset of [0.74, 0.88]) {
+        const [cx, cy] = project(x + w / 2, y - h / 2 + h * offset);
+        context.beginPath();
+        context.arc(cx, cy - height * 0.55, 4.5, 0, Math.PI * 2);
+        context.stroke();
+      }
+      context.restore();
+      break;
+    }
+    case "crate": {
+      // Cross-braced planks on both visible faces.
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      for (const face of ["right", "left"] as const) {
+        facePanel(context, x, y, w, h, height, face, 0.08, 0.92, 0.08, 0.92, null);
+        facePanel(context, x, y, w, h, height, face, 0.08, 0.92, 0.46, 0.54, null, INK, 1.5);
+        const a = facePanelCorners(x, y, w, h, height, face);
+        context.save();
+        context.strokeStyle = INK;
+        context.lineWidth = 1.5;
+        context.beginPath();
+        context.moveTo(a.bl[0], a.bl[1]); context.lineTo(a.tr[0], a.tr[1]);
+        context.moveTo(a.br[0], a.br[1]); context.lineTo(a.tl[0], a.tl[1]);
+        context.stroke();
+        context.restore();
+      }
+      break;
+    }
+    case "desk": {
+      // A writing desk: top slab, one drawer pedestal, two legs, and papers on top.
+      const topThickness = 7;
+      leg(context, x - w * 0.42, y + h * 0.3, height - topThickness, shade.right);
+      leg(context, x - w * 0.42, y - h * 0.3, height - topThickness, shade.right);
+      isoBox(context, x + w * 0.22, y, w * 0.4, h * 0.82, height - topThickness,
+        shade.top, shade.left, shade.right);
+      facePanel(context, x + w * 0.22, y, w * 0.4, h * 0.82, height - topThickness,
+        "right", 0.15, 0.85, 0.55, 0.85, null);
+      faceLine(context, x + w * 0.22, y, w * 0.4, h * 0.82, height - topThickness,
+        "right", 0.4, 0.6, 0.7, 3);
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      // A blotter and a couple of loose papers, so the top is not a blank slab.
+      context.save();
+      const [bx, by] = project(x - w * 0.14, y);
+      context.fillStyle = piece.emptied ? "#8d967a" : "#3c4530";
+      context.beginPath();
+      context.ellipse(bx, by - height - 1, 15, 7, 0, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = PAPER;
+      context.strokeStyle = INK;
+      context.lineWidth = 1.5;
+      context.beginPath();
+      context.ellipse(bx + 16, by - height - 3, 8, 4, 0.3, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.restore();
+      break;
+    }
+    case "table": {
+      // Open underneath: four legs and a thin top, which reads nothing like a cabinet.
+      const topThickness = 6;
+      const legHeight = height - topThickness;
+      for (const [lx, ly] of [
+        [-w * 0.4, -h * 0.32], [w * 0.4, -h * 0.32], [-w * 0.4, h * 0.32], [w * 0.4, h * 0.32],
+      ] as const) {
+        leg(context, x + lx, y + ly, legHeight, shade.right);
+      }
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      facePanel(context, x, y, w, h, height, "right", 0, 1,
+        (height - topThickness) / height, 1, null, INK, 1.5);
+      break;
+    }
+    case "bench": {
+      // A seat slab on legs with a slatted backrest along its far edge.
+      const seat = 5;
+      for (const lx of [-w * 0.38, w * 0.38]) {
+        leg(context, x + lx, y + h * 0.26, height - seat, shade.right);
+        leg(context, x + lx, y - h * 0.26, height - seat, shade.right);
+      }
+      isoBox(context, x, y, w, h, height, shade.top, shade.left, shade.right);
+      // Two rails on end posts, not a solid panel: a slab this tall reads as a partition.
+      for (const px of [-w * 0.44, w * 0.44]) {
+        isoBox(context, x + px, y - h * 0.4, 6, 6, height + 24, shade.top, "#7c866a", shade.right);
+      }
+      for (const lift of [14, 24]) {
+        isoBox(context, x, y - h * 0.4, w * 0.88, 5, height + lift,
+          shade.top, shade.left, shade.right);
+      }
+      break;
+    }
+    case "barrel": {
+      // Curved staves and two iron hoops: the one round silhouette in the mansion.
+      context.save();
+      const rx = w * 0.5;
+      const ry = w * 0.5 * (BY / AX);
+      const bulge = 5;
+      context.beginPath();
+      context.moveTo(sx - rx, sy - ry);
+      context.quadraticCurveTo(sx - rx - bulge, sy - height * 0.5, sx - rx, sy - height + ry * 0.2);
+      context.lineTo(sx + rx, sy - height + ry * 0.2);
+      context.quadraticCurveTo(sx + rx + bulge, sy - height * 0.5, sx + rx, sy - ry);
+      context.closePath();
+      context.fillStyle = shade.right;
+      context.fill();
+      context.strokeStyle = INK;
+      context.lineWidth = 2;
+      context.stroke();
+      context.fillStyle = shade.top;
+      context.beginPath();
+      context.ellipse(sx, sy - height, rx, ry, 0, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.lineWidth = 3;
+      for (const level of [0.32, 0.68]) {
+        context.beginPath();
+        context.moveTo(sx - rx - bulge * 0.7, sy - height * level);
+        context.quadraticCurveTo(sx, sy - height * level + ry * 0.9, sx + rx + bulge * 0.7, sy - height * level);
+        context.stroke();
+      }
+      context.restore();
+      break;
+    }
+    case "planter": {
+      // A tapered pot with a rim, and foliage above it.
+      context.save();
+      const rTop = w * 0.46;
+      const rBottom = w * 0.3;
+      const ryTop = rTop * (BY / AX);
+      context.beginPath();
+      context.moveTo(sx - rBottom, sy);
+      context.lineTo(sx - rTop, sy - height);
+      context.lineTo(sx + rTop, sy - height);
+      context.lineTo(sx + rBottom, sy);
+      context.closePath();
+      context.fillStyle = shade.right;
+      context.fill();
+      context.strokeStyle = INK;
+      context.lineWidth = 2;
+      context.stroke();
+      context.fillStyle = shade.top;
+      context.beginPath();
+      context.ellipse(sx, sy - height, rTop, ryTop, 0, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      if (!piece.emptied) {
+        context.fillStyle = "#4d6b2e";
+        for (const [ox, oy, r] of [[-9, -14, 11], [9, -12, 10], [0, -24, 12]] as const) {
+          context.beginPath();
+          context.arc(sx + ox, sy - height + oy, r, 0, Math.PI * 2);
+          context.fill();
+          context.stroke();
+        }
+      }
+      context.restore();
+      break;
+    }
+    case "painting": {
+      // A framed canvas leaning against the wall on a low crate, rather than hung flat.
+      isoBox(context, x, y, w * 0.9, h, 10, shade.top, shade.left, shade.right);
+      context.save();
+      const fw = w * 0.42;
+      context.translate(sx, sy - 10);
+      context.transform(1, 0, -0.18, 1, 0, 0);
+      context.fillStyle = shade.right;
+      context.strokeStyle = INK;
+      context.lineWidth = 2;
+      context.fillRect(-fw, -height, fw * 2, height);
+      context.strokeRect(-fw, -height, fw * 2, height);
+      context.fillStyle = piece.emptied ? "#8d967a" : "#3c4530";
+      context.fillRect(-fw + 6, -height + 6, fw * 2 - 12, height - 12);
+      context.strokeStyle = SIGNAL;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(-fw + 10, -10);
+      context.lineTo(-4, -height * 0.55);
+      context.lineTo(fw - 10, -14);
+      context.stroke();
+      context.restore();
+      break;
+    }
+  }
+  context.restore();
+
+  if (piece.emptied) {
+    context.fillStyle = "rgba(20, 24, 15, 0.45)";
+    context.font = "600 11px ui-monospace, monospace";
+    context.textAlign = "center";
+    context.fillText("SEARCHED", sx, sy + 13);
+  }
+
+  if (trap) drawTrapMarker(context, piece.x, piece.y, height, trap, timeMs, reducedMotion);
+
+  if (highlighted) {
+    context.save();
+    context.strokeStyle = SIGNAL;
+    context.lineWidth = 3;
+    context.beginPath();
+    context.ellipse(sx, sy, w * 0.62, h * 0.32, 0, 0, Math.PI * 2);
+    context.stroke();
+    context.restore();
+  }
+}
+
+/** The four screen corners of a box face, for detail that is not axis-aligned. */
+function facePanelCorners(
+  x: number, y: number, w: number, d: number, height: number, face: "right" | "left",
+) {
+  const hw = w / 2, hd = d / 2;
+  const at = (u: number, v: number) => {
+    const [sx, sy] = face === "right"
+      ? project(x + hw, y - hd + u * d)
+      : project(x - hw + u * w, y + hd);
+    return [sx, sy - v * height] as const;
+  };
+  return { bl: at(0.1, 0.1), br: at(0.9, 0.1), tl: at(0.1, 0.9), tr: at(0.9, 0.9) };
+}
 
 /** A warning pennant over a trapped furniture piece or doorway. Green is yours, amber is not. */
 export function drawTrapMarker(
@@ -461,63 +831,6 @@ export function drawTrapMarker(
   context.textAlign = "center";
   context.fillText("!", sx, top - 11);
   context.restore();
-}
-
-function drawFurniture(
-  context: CanvasRenderingContext2D,
-  piece: MatchSnapshot["furniture"][number],
-  trap: RoomTrap | null,
-  highlighted: boolean,
-  timeMs: number,
-  reducedMotion: boolean,
-): void {
-  const { w, h } = FURNITURE_FOOTPRINT[piece.type];
-  const height = FURNITURE_HEIGHT[piece.type];
-  const lid = piece.emptied ? "#aab394" : "#dfe4d2";
-  const front = piece.emptied ? "#c3cbb0" : PAPER;
-  isoBox(context, piece.x, piece.y, w, h, height, lid, "#959e80", front);
-
-  const [sx, sy] = project(piece.x, piece.y);
-
-  // A small face detail per type, so silhouettes stay distinguishable at phone size.
-  context.save();
-  context.strokeStyle = INK;
-  context.lineWidth = 2;
-  context.beginPath();
-  if (piece.type === "safe" || piece.type === "locker" || piece.type === "cabinet") {
-    context.arc(sx + 6, sy - height / 2, 5, 0, Math.PI * 2);
-  } else if (piece.type === "desk" || piece.type === "console") {
-    context.moveTo(sx - 16, sy - height / 2); context.lineTo(sx + 16, sy - height / 2);
-  } else if (piece.type === "crate") {
-    context.moveTo(sx - 14, sy - height + 8); context.lineTo(sx + 14, sy - height / 3);
-  } else if (piece.type === "planter") {
-    context.moveTo(sx, sy - height); context.lineTo(sx, sy - height - 14);
-    context.moveTo(sx, sy - height - 8); context.lineTo(sx - 9, sy - height - 16);
-    context.moveTo(sx, sy - height - 8); context.lineTo(sx + 9, sy - height - 16);
-  } else {
-    context.rect(sx - 12, sy - height + 6, 24, height - 16);
-  }
-  context.stroke();
-  context.restore();
-
-  if (piece.emptied) {
-    context.fillStyle = "rgba(20, 24, 15, 0.45)";
-    context.font = "600 11px ui-monospace, monospace";
-    context.textAlign = "center";
-    context.fillText("SEARCHED", sx, sy + 13);
-  }
-
-  if (trap) drawTrapMarker(context, piece.x, piece.y, height, trap, timeMs, reducedMotion);
-
-  if (highlighted) {
-    context.save();
-    context.strokeStyle = SIGNAL;
-    context.lineWidth = 3;
-    context.beginPath();
-    context.ellipse(sx, sy, w * 0.62, h * 0.32, 0, 0, Math.PI * 2);
-    context.stroke();
-    context.restore();
-  }
 }
 
 /**

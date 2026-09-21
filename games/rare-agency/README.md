@@ -72,6 +72,15 @@ its own and says so in the match header while it is away.
 
 ## Rules
 
+**Furnishing.** Every room is furnished from its own palette, so the twelve kinds of
+furniture tell you where you are: filing cabinets and safes in the Records Vault,
+consoles and lockers in the Signals Room, barrels in the Wine Cellar, tables and
+bookcases in the Great Hall. Each kind is drawn as itself rather than as a labelled
+box — drawers and handles, shelves of book spines, hooped staves, legs with daylight
+under them — and no two pieces are ever placed close enough to clip each other. The
+room's name plate hangs on whichever far wall has no doorway, and wall dressing is
+kept clear of it.
+
 **The embassy.** Nine rooms in a 3×3 block. You see only the room you are standing
 in, so other agents are invisible until you walk in on them. Doorways sit at the
 middle of each shared wall; you must line up with one to pass through.

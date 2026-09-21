@@ -588,3 +588,86 @@ test("effects are pruned once their animation has run out", () => {
   run(match, P.EFFECT_DURATION_MS.impact + 100);
   assert.equal(match.effects.length, 0, "presentation state must not accumulate over a match");
 });
+
+// --- Room furnishing and the name plate -------------------------------------------------
+
+test("every room is furnished only from its own palette", () => {
+  for (const seed of [1, 7, 20260920, 99991]) {
+    const embassy = map.createMap(seed);
+    for (const room of embassy.rooms) {
+      const allowed = P.ROOM_FURNITURE[room.index];
+      assert.ok(allowed, `room ${room.index} should have a furniture palette`);
+      for (const piece of room.furniture) {
+        assert.ok(allowed.includes(piece.type),
+          `${P.ROOM_NAMES[room.index]} should not contain a ${piece.type}`);
+      }
+    }
+  }
+});
+
+test("a room's furniture is varied rather than five of the same thing", () => {
+  for (const seed of [1, 7, 20260920, 99991]) {
+    const embassy = map.createMap(seed);
+    for (const room of embassy.rooms) {
+      const kinds = new Set(room.furniture.map(piece => piece.type));
+      assert.ok(kinds.size >= 4,
+        `${P.ROOM_NAMES[room.index]} has only ${kinds.size} kinds of furniture on seed ${seed}`);
+    }
+  }
+});
+
+test("every furniture type has a footprint, a label and appears somewhere", () => {
+  const placed = new Set();
+  for (let seed = 1; seed <= 40; seed++) {
+    for (const room of map.createMap(seed).rooms) {
+      for (const piece of room.furniture) placed.add(piece.type);
+    }
+  }
+  for (const type of P.FURNITURE_TYPES) {
+    assert.ok(P.FURNITURE_FOOTPRINT[type], `${type} needs a footprint`);
+    assert.ok(P.FURNITURE_LABELS[type], `${type} needs a label`);
+    assert.ok(placed.has(type), `${type} is never placed in any room`);
+  }
+});
+
+test("wall dressing never overlaps the room name plate", () => {
+  // The plate hangs at the middle of whichever far wall has no doorway. Screen separation
+  // along a wall is proportional to world separation, so this is checked in world units.
+  const CLEAR = 130;
+  for (const seed of [1, 7, 20260920, 99991]) {
+    const embassy = map.createMap(seed);
+    for (const room of embassy.rooms) {
+      const onNorth = !room.doors.includes("north");
+      for (const piece of room.decor) {
+        const onSignWall = onNorth ? piece.y === 0 : piece.x === 0;
+        if (!onSignWall) continue;
+        const gap = onNorth
+          ? Math.abs(piece.x - P.ROOM_W / 2)
+          : Math.abs(piece.y - P.ROOM_H / 2);
+        assert.ok(gap >= CLEAR,
+          `${P.ROOM_NAMES[room.index]}: a ${piece.type} sits ${gap} from the name plate`);
+      }
+    }
+  }
+});
+
+test("furniture never clips other furniture, and every room is fully furnished", () => {
+  for (let seed = 1; seed <= 120; seed++) {
+    for (const room of map.createMap(seed).rooms) {
+      assert.equal(room.furniture.length, 5,
+        `${P.ROOM_NAMES[room.index]} on seed ${seed} has ${room.furniture.length} pieces`);
+      for (let i = 0; i < room.furniture.length; i++) {
+        for (let j = i + 1; j < room.furniture.length; j++) {
+          const a = room.furniture[i];
+          const b = room.furniture[j];
+          const fa = P.FURNITURE_FOOTPRINT[a.type];
+          const fb = P.FURNITURE_FOOTPRINT[b.type];
+          const apart = Math.abs(a.x - b.x) >= (fa.w + fb.w) / 2
+            || Math.abs(a.y - b.y) >= (fa.h + fb.h) / 2;
+          assert.ok(apart,
+            `seed ${seed} ${P.ROOM_NAMES[room.index]}: ${a.type} and ${b.type} interpenetrate`);
+        }
+      }
+    }
+  }
+});
