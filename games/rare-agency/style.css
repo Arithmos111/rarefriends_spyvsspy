@@ -525,3 +525,12 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .er-lesson-bar button { font-size: 12px; padding: 0.3em 0.7em; }
+
+/* Audio and settings, reachable from the header on every screen outside a match. */
+.er-quiet {
+  font-size: 11px; padding: 0.25em 0.6em;
+  background: transparent; color: var(--paper);
+  border: 1px solid rgba(238, 241, 228, 0.4);
+}
+.er-quiet[aria-pressed="false"] { border-color: var(--alert); color: var(--alert); }
+.er-top .er-status { display: flex; align-items: center; gap: 0.6em; }

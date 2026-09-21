@@ -82,7 +82,15 @@ and is told who walked into it. Striking reads differently depending on what you
 a bare fist flares, the stiletto sweeps a bright arc and lands as a slash — and detonations are
 drawn over the room, so one is never hidden behind the furniture it was planted on.
 
-Sound is off by default. Mute and reduce-motion live in the in-match settings menu (≡), and
+**Sound and music ship switched on.** Nothing actually sounds until you click, because
+browsers keep an audio context suspended until a gesture and the first screen needs one to get
+past it — so the music starts when you deploy your agent, not on load. A **Sound on/off**
+toggle sits in the header on every screen outside a match, and both it and a separate music
+toggle live in the settings menu (≡), which the header also opens. The choice lasts the
+session: the game runs in an `allow-scripts` sandbox whose opaque origin makes `localStorage`
+throw, so there is nowhere to persist it.
+
+Reduce-motion lives in the same settings menu, and
 reduced motion is also picked up from your system setting. If a Friend's artwork fails to load
 it is drawn as a dashed placeholder with a **Retry artwork** control; the relay reconnects on
 its own and says so in the match header while it is away.
@@ -284,6 +292,9 @@ widths.
   chance-game contract does not model.
 - **A portrait phone is cramped.** The SDK container is a fixed 3:2 box, so upright
   phones get a small stage. The game stays playable and shows a prompt to rotate.
+- **Audio and motion preferences reset on reload.** The game runs in an `allow-scripts`
+  sandbox, so its origin is opaque and `localStorage` throws on access. There is nowhere
+  inside the sandbox to keep a preference between visits.
 - **Reconnecting mid-match rejoins as a new agent** rather than resuming the old one.
 - **The SDK's Friend picker does not scale to a large collection.** It renders owned
   Friends as a flat list of text buttons with no artwork, no search and no ordering, so

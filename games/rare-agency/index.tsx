@@ -109,7 +109,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   // ---- Presentation ---------------------------------------------------------------------
   const [menu, setMenu] = useState<Menu>(null);
   const [equippedKit, setEquippedKit] = useState<string>(FIELD_KIT_ID);
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [lobbyName, setLobbyName] = useState("");
@@ -214,9 +214,12 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   }, [client]);
 
   useEffect(() => {
-    soundRef.current = createFriendSoundKit({ muted: true });
+    // Audio ships on. Browsers keep the context suspended until a gesture, and the first
+    // screen needs a click to get past it, so nothing sounds before the player has acted.
+    soundRef.current = createFriendSoundKit({ muted: mutedRef.current });
     audioRef.current = createAudio();
-    audioRef.current.setMuted(true);
+    audioRef.current.setMuted(mutedRef.current);
+    audioRef.current.setMusic(musicRef.current);
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
     const sync = () => setReducedMotion(preference.matches);
     sync();
@@ -231,13 +234,20 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     };
   }, [refreshEconomy]);
 
-  /** Music plays during a match and the escape, and stops everywhere else. */
+  /** Music runs from the title screen through to the results, and stops when either toggle is off. */
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (!muted && musicOn && (screen === "match" || screen === "escape")) audio.startMusic();
+    if (!muted && musicOn) audio.startMusic();
     else audio.stopMusic();
-  }, [muted, musicOn, screen]);
+  }, [muted, musicOn]);
+
+  // These choices last the session only. The game runs in an allow-scripts sandbox, whose
+  // opaque origin makes localStorage throw on access, so there is nowhere to persist them.
+  const mutedRef = useRef(muted);
+  const musicRef = useRef(musicOn);
+  mutedRef.current = muted;
+  musicRef.current = musicOn;
 
   const pushFlash = useCallback((flash: Omit<Flash, "id" | "at">) => {
     const entry: Flash = { ...flash, id: flashSeq.current++, at: Date.now() };
@@ -909,6 +919,20 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       <div className="er-status">
         <span className={`er-dot er-dot-${netStatus}`} aria-hidden="true" />
         <span>{statusLine}</span>
+        {/* Audio ships on, so the way to turn it off has to be reachable from every screen,
+            not only from inside a match. */}
+        {/* No aria-label: the visible text is the accessible name, and aria-pressed
+            carries the state. An aria-label here would override the text people read. */}
+        <button type="button" className="er-quiet" aria-pressed={!muted}
+          onClick={() => {
+            const next = !muted;
+            setMuted(next);
+            soundRef.current?.setMuted(next);
+            audioRef.current?.setMuted(next);
+            if (!next) { void soundRef.current?.unlock(); void audioRef.current?.unlock(); }
+          }}>{muted ? "Sound off" : "Sound on"}</button>
+        <button type="button" className="er-quiet"
+          onClick={() => setMenu("settings")} aria-label="Open settings">Settings</button>
       </div>
     </header>}
 

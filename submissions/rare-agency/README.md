@@ -42,7 +42,7 @@ Agents have **5 health**. A strike takes 1, or 2 with the stiletto. Hidden along
 
 Carry all four items to the courtyard gate in the centre room to win, which plays out as a run across an airport apron to a waiting aircraft. If the 5-minute clock expires first, the agent holding the most intelligence wins; a tie means nobody does.
 
-The match header carries a nine-cell plan of the embassy, a four-slot mission track showing what you hold and what is still missing, and a health bar. Picking anything up flashes its icon and name centre-screen. Settings (≡) hold mute, music and reduce-motion; failed Friend artwork can be retried. Everything stays inside the SDK's 960 × 640 container.
+The match header carries a nine-cell plan of the embassy, a four-slot mission track showing what you hold and what is still missing, and a health bar. Picking anything up flashes its icon and name centre-screen. Sound and music ship switched on, with a toggle in the header on every screen outside a match; settings (≡) hold both toggles and reduce-motion; failed Friend artwork can be retried. Everything stays inside the SDK's 960 × 640 container.
 
 **Career standings.** Every finished match adds to a total kept per Rare Friend on the relay, persisted to disk so it survives restarts: 100 for escaping with the full set, 40 for leading on time, 10 per item still held, 5 per takedown, 5 for surviving. Items stop counting once dropped. Players can also name their Friend, shown in parentheses after the codename everywhere, stored against the Friend rather than the session.
 

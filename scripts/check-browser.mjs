@@ -122,6 +122,15 @@ try {
   }
   step("the agent confirmation names the Friend and how to change it");
 
+  // Audio ships on, and the way to turn it off is reachable before a match starts.
+  const soundToggle = one.child.getByRole("button", { name: /^Sound (on|off)$/ }).first();
+  assert.equal(await soundToggle.innerText(), "Sound on", "audio should ship switched on");
+  await soundToggle.click();
+  assert.equal(await soundToggle.innerText(), "Sound off", "the header toggle should mute");
+  await soundToggle.click();
+  assert.equal(await soundToggle.innerText(), "Sound on", "and unmute again");
+  step("audio defaults to on and can be turned off from any screen");
+
   // --- Title screen ----------------------------------------------------------------------
   // The attract screen is what everybody sees first, and it names the Friend being played.
   await one.child.getByRole("button", { name: "Training run", exact: true })
