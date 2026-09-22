@@ -11,6 +11,7 @@ import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRelay, RELAY_PATH } from "../server/relay.mjs";
+import { handleStatsRequest } from "../server/stats-page.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 export const GAME_DIR = path.join(root, "games/rare-agency");
@@ -51,6 +52,19 @@ export function parseHostArgs(argv) {
 
 export function attachRelay(server, { log = console.log } = {}) {
   const relay = createRelay({ log });
+
+  // The operator dashboard shares the game's origin and port, so it needs no second service
+  // and no second certificate. The SDK's static server serves generated files only and would
+  // 404 these paths, so take them first and hand everything else straight back to it. Its
+  // listeners are moved rather than duplicated: leaving them attached would have both this
+  // and the SDK write to the same response.
+  const downstream = server.listeners("request");
+  server.removeAllListeners("request");
+  server.on("request", (request, response) => {
+    if (handleStatsRequest(request, response, () => relay.report())) return;
+    for (const listener of downstream) listener.call(server, request, response);
+  });
+
   server.on("upgrade", (request, socket, head) => {
     let pathname;
     try { pathname = new URL(request.url, "http://localhost").pathname; }

@@ -18,6 +18,7 @@ import { applyAction, applyInput, createMatch, dropPlayer, scoreOf, stepMatch } 
 import { buildSnapshot as snapshotFor, recapOf, scoreboardOf } from "../games/rare-agency/shared/view.ts";
 import { holdsGenesis, ownerOfFriend, rpcConfigSummary } from "./rpc.mjs";
 import { createLeaderboard } from "./leaderboard.mjs";
+import { createStats } from "./stats.mjs";
 
 const CODENAMES = [
   "FALCON", "VIPER", "MAGPIE", "OTTER", "JACKAL", "HERON", "KESTREL", "MARTEN",
@@ -34,7 +35,11 @@ export function createRelay({ log = console.log } = {}) {
   /** @type {Map<string, any>} */ const lobbies = new Map();
   const wss = new WebSocketServer({ noServer: true });
   const leaderboard = createLeaderboard({ log });
-  const ready = leaderboard.load().catch(error => log(`leaderboard: ${error.message}`));
+  const stats = createStats({ log });
+  const ready = Promise.all([
+    leaderboard.load().catch(error => log(`leaderboard: ${error.message}`)),
+    stats.load().catch(error => log(`stats: ${error.message}`)),
+  ]);
 
   const send = (player, message) => {
     if (player.socket.readyState === 1) player.socket.send(JSON.stringify(message));
@@ -212,6 +217,7 @@ export function createRelay({ log = console.log } = {}) {
       if (player) send(player, startMessage);
     }
     lobby.timer = setInterval(() => tickLobby(lobby), TICK_MS);
+    stats.matchStarted(roster.length);
     broadcastLobbyList();
     log(`match started in lobby ${lobby.code} with ${roster.length} agents`);
   }
@@ -262,11 +268,25 @@ export function createRelay({ log = console.log } = {}) {
       });
     }
 
+    const recap = recapOf(match);
     const message = {
       t: "match.end", winner: match.winner, winnerName: winner?.codename ?? null,
       reason: match.endReason, escaped: match.escaped, results,
-      recap: recapOf(match),
+      recap,
     };
+
+    // The operator page is fed the same recap the players are shown, so the totals behind the
+    // counter and the numbers on their screen can never drift apart.
+    stats.matchFinished({
+      code: lobby.code,
+      // The sim has no start stamp, but its deadline is fixed at creation, so elapsed time
+      // is the whole match minus whatever was left on the clock.
+      seconds: MATCH_SECONDS - (match.endsAt - match.now) / 1000,
+      escaped: match.escaped,
+      winner: winner?.codename ?? null,
+      reason: match.endReason,
+      recap,
+    });
     for (const playerId of lobby.members.keys()) {
       const player = players.get(playerId);
       if (player) {
@@ -308,6 +328,7 @@ export function createRelay({ log = console.log } = {}) {
       return;
     }
     player.friendId = friendId;
+    stats.connected();
     player.codename = typeof message.codename === "string" && /^[A-Z0-9-]{3,12}$/.test(message.codename)
       ? message.codename
       : CODENAMES[Math.floor(Math.random() * CODENAMES.length)];
@@ -373,6 +394,7 @@ export function createRelay({ log = console.log } = {}) {
           createdAt: now(), lastActivity: now(),
         };
         lobbies.set(newCode, created);
+        stats.lobbyOpened();
         return joinLobby(player, created, message.kitId);
       }
 
@@ -459,6 +481,8 @@ export function createRelay({ log = console.log } = {}) {
       if (player.socket.readyState === 1) player.socket.ping();
     }
     const at = now();
+    // High-water marks, raised from the loop that is already running every second.
+    stats.observe({ players: players.size, matches: activeMatches() });
     for (const lobby of [...lobbies.values()]) {
       if (lobby.state === "waiting") {
         // Run the clock here as well as on every ready change, so joining or leaving a lobby
@@ -481,12 +505,28 @@ export function createRelay({ log = console.log } = {}) {
         careers: leaderboard.size(), rpc: rpcConfigSummary(),
       };
     },
+    /** Everything the operator page shows: what is happening now, and what has happened. */
+    report() {
+      return {
+        live: {
+          players: players.size,
+          lobbies: lobbies.size,
+          openLobbies: publicLobbies().length,
+          matches: activeMatches(),
+        },
+        careers: leaderboard.size(),
+        top: leaderboard.top(10),
+        rpc: rpcConfigSummary(),
+        protocol: PROTOCOL_VERSION,
+        totals: stats.snapshot(),
+      };
+    },
     leaderboard,
     stop() {
       clearInterval(housekeeping);
       for (const lobby of lobbies.values()) if (lobby.timer) clearInterval(lobby.timer);
       wss.close();
-      return leaderboard.stop();
+      return Promise.all([leaderboard.stop(), stats.stop()]);
     },
   };
 }

@@ -20,7 +20,8 @@
     "screenshots": "node scripts/screenshots.mjs",
     "check:proxy": "node scripts/check-proxy.mjs",
     "preview": "node scripts/preview-shot.mjs",
-    "submission": "node scripts/stamp-submission.mjs"
+    "submission": "node scripts/stamp-submission.mjs",
+    "submission:pr": "node scripts/update-submission-pr.mjs"
   },
   "dependencies": {
     "@rarefriends/friendsdk": "file:vendor/rarefriends-friendsdk.tgz",

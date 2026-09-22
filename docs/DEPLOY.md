@@ -173,6 +173,37 @@ curl -I https://agency.example.com
 Then open the site in a browser with your wallet, connect, select your Friend and create a
 lobby. Open it on a second device to confirm two agents meet in one match.
 
+### Watching it while people play
+
+The relay publishes an operator dashboard on the same origin and port as the game, so it needs
+no second service and no second certificate:
+
+| URL | What it is |
+|---|---|
+| `https://your-domain/stats` | A dashboard: who is online now, matches run, how they ended, a fortnight of daily traffic, the last 25 matches and the career top ten. Refreshes itself every 10 seconds. |
+| `https://your-domain/stats.json` | The same figures as JSON, for scripting or an uptime check. |
+
+It is read-only — nothing on it can end a match, drop a player or edit the standings — and it
+publishes nothing a player cannot already see in game: no wallet addresses, no IPs. Friend
+token ids and codenames appear exactly as they do on the in-game scoreboard.
+
+Totals live in `stats.json` in the same volume as the leaderboard, written the same way
+(debounced, atomic rename), so they survive a restart. Anything live is recomputed and never
+stored.
+
+**To put it behind a password**, set `RF_STATS_TOKEN` to a secret and both routes then require
+`?token=…`, answering 404 without it. Unset by default:
+
+```sh
+# in .env
+RF_STATS_TOKEN=some-long-random-string
+```
+
+```sh
+docker compose up -d
+curl -sf "https://your-domain/stats.json?token=some-long-random-string" | head
+```
+
 ### 7. Running it day to day
 
 ```sh

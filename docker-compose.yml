@@ -21,6 +21,9 @@ services:
       # `RF_GENESIS_ADDRESS: ${RF_GENESIS_ADDRESS:-}` would always define it, and an empty
       # value means "switch the Genesis perk off", so the default would silently disable it.
       RF_GENESIS_ADDRESS:
+      # Same pass-through reasoning: unset means the /stats dashboard is open, and an empty
+      # value would be a token nobody can match, locking it shut by accident.
+      RF_STATS_TOKEN:
     volumes:
       # Deliberately still named embassy_data. Compose derives the real volume name from
       # this key, so renaming it would create an empty volume and orphan the career
