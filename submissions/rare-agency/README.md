@@ -1,6 +1,6 @@
 # The Rare Agency
 
-- **Builder:** Arithmos111
+- **Builder:** arithmos
 - **Contact:** [@arithmos0x on X](https://x.com/arithmos0x) · `arithmosxtg` on Telegram
 - **Category:** Character Spotlight, also entered for Economy Potential
 - **Playable preview:** https://rareagency.rwplay.net
