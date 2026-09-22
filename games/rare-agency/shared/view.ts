@@ -109,7 +109,10 @@ export function buildSnapshot(sim: MatchSim, playerId: string): MatchSnapshot {
       .map(player => actorOf(sim, player)),
     furniture: room.furniture.map(piece => ({
       id: piece.id, type: piece.type, x: piece.x, y: piece.y, slot: piece.slot,
-      searched: piece.searched, emptied: piece.emptied,
+      // Only your own searching is visible. A piece a rival turned out still looks untouched
+      // to you, so you pay the 0.9s to find out — which is the whole tension of the room.
+      searched: piece.searchedBy.includes(playerId),
+      emptied: piece.emptied && piece.searchedBy.includes(playerId),
     })),
     traps,
     drops: sim.drops.filter(drop => drop.room === self.room)

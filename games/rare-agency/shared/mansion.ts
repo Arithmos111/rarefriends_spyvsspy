@@ -26,6 +26,16 @@ export const SPAWN_ROOMS: readonly number[] = Object.freeze([0, 2, 6, 8]);
 export type Furniture = {
   id: number; slot: number; type: FurnitureType; x: number; y: number;
   contents: Carryable | null; searched: boolean; emptied: boolean;
+  /**
+   * Who has turned this piece out, by player id.
+   *
+   * Searching is private: you can see what you have been through, and nobody else's work.
+   * Walking into a room and reading off which drawers a rival has already opened would hand
+   * you their whole route for free, and not knowing is the point of the fog of war. The
+   * `searched` and `emptied` flags above stay as the sim's own record; the per-viewer answer
+   * is built from this list.
+   */
+  searchedBy: string[];
 };
 export type Room = {
   index: number; name: string; doors: readonly Direction[];
@@ -231,7 +241,7 @@ export function createMap(seed: number): EmbassyMap {
       const [x, y] = WALL_FURNITURE_SPOTS[slot];
       hangingPieces.push({
         id: index * 100 + WALL_FURNITURE_SLOT_BASE + slot, slot: WALL_FURNITURE_SLOT_BASE + slot,
-        type, x, y, contents: null, searched: false, emptied: false,
+        type, x, y, contents: null, searched: false, emptied: false, searchedBy: [],
       });
     });
 
@@ -251,7 +261,7 @@ export function createMap(seed: number): EmbassyMap {
       used.add(type);
       furniture.push({
         id: index * 100 + slot, slot, type, x, y,
-        contents: null, searched: false, emptied: false,
+        contents: null, searched: false, emptied: false, searchedBy: [],
       });
     }
     furniture.push(...hangingPieces);

@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -47,7 +47,14 @@ export const INTERACT_RANGE = 74;
 
 export const ATTACK_RANGE = 46;
 /** Five hit points means a brawl needs five landed blows, so the swing rate is quicker. */
-export const ATTACK_COOLDOWN_MS = 750;
+/**
+ * Gap between swings.
+ *
+ * 750ms left 570ms of dead air after each windup, which read as the game not listening even
+ * once the swing itself was predicted. 600 keeps a fist fight at five exchanges and a
+ * stiletto at three, so the balance is unchanged, and closes most of the gap.
+ */
+export const ATTACK_COOLDOWN_MS = 600;
 export const ATTACK_WINDUP_MS = 180;
 export const HIT_STUN_MS = 380;
 export const PLAYER_MAX_HP = 5;

@@ -1069,3 +1069,84 @@ test("collecting a power-up counts once, and mission items do not", () => {
   assert.equal(player.itemsFound, 0, "a medkit is not intelligence");
   assert.equal(view.recapOf(match).find(row => row.playerId === "a").powerUps, 1);
 });
+
+test("searching is private: a rival's furniture still looks untouched", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const mine = match.players.get("a");
+  const piece = match.map.rooms[0].furniture[0];
+  mine.room = 0; mine.x = piece.x; mine.y = piece.y + 30;
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.ok(piece.searched, "the sim's own record still says it was searched");
+
+  match.players.get("b").room = 0;
+  const theirs = view.buildSnapshot(match, "b").furniture.find(entry => entry.id === piece.id);
+  assert.equal(theirs.searched, false, "a rival should not see whose drawers have been opened");
+  assert.equal(theirs.emptied, false);
+
+  const ours = view.buildSnapshot(match, "a").furniture.find(entry => entry.id === piece.id);
+  assert.equal(ours.searched, true, "you can always see your own work");
+  assert.equal(ours.emptied, true);
+});
+
+test("an emptied cache still reads as untouched to everyone but whoever emptied it", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const room = match.map.rooms.find(entry =>
+    entry.furniture.some(piece => P.MISSION_ITEMS.includes(piece.contents)));
+  const piece = room.furniture.find(entry => P.MISSION_ITEMS.includes(entry.contents));
+  const finder = match.players.get("a");
+  finder.room = room.index; finder.x = piece.x; finder.y = piece.y + 30;
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+  assert.equal(finder.inventory.length, 1, "the item should have been recovered");
+
+  match.players.get("b").room = room.index;
+  const seen = view.buildSnapshot(match, "b").furniture.find(entry => entry.id === piece.id);
+  assert.equal(seen.emptied, false, "nobody gets told the cache is already spent");
+});
+
+test("a doorway trap is invisible from either side to everyone but its owner", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const planter = match.players.get("a");
+  planter.room = 0;
+  const anchor = sim.doorAnchor("south");
+  planter.x = anchor.x; planter.y = anchor.y - 20;
+  const targetId = P.canonicalDoorTrapId(0, "south");
+  sim.applyAction(match, "a", { kind: "plant", targetId, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+  assert.ok(match.traps.has(targetId), "the doorway should be rigged");
+
+  const other = match.players.get("b");
+  assert.equal(other.detector, false, "a field kit carries no detector");
+  // The far side of the same opening, and then the near side.
+  for (const room of [3, 0]) {
+    other.room = room;
+    assert.deepEqual(view.buildSnapshot(match, "b").traps, [],
+      `a rival standing in room ${room} should see no sign of it`);
+  }
+  // The owner sees it from wherever they stand, marked as theirs.
+  for (const room of [0, 3]) {
+    planter.room = room;
+    const seen = view.buildSnapshot(match, "a").traps;
+    assert.equal(seen.length, 1, `the owner should see their own trap from room ${room}`);
+    assert.equal(seen[0].mine, true);
+  }
+});
+
+test("a detector is the only thing that reveals someone else's trap", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b", kit: "counter" }));
+  const planter = match.players.get("a");
+  const piece = match.map.rooms[0].furniture[0];
+  planter.room = 0; planter.x = piece.x; planter.y = piece.y + 30;
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+
+  const spotter = match.players.get("b");
+  spotter.room = 0;
+  spotter.detector = false;
+  assert.deepEqual(view.buildSnapshot(match, "b").traps, [], "no detector, no warning");
+  spotter.detector = true;
+  const seen = view.buildSnapshot(match, "b").traps;
+  assert.equal(seen.length, 1, "a detector is what a detector is for");
+  assert.equal(seen[0].mine, false, "and it is marked as somebody else's");
+});

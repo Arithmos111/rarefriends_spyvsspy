@@ -133,14 +133,22 @@ test("a computer agent knows only the rooms it has stood in", () => {
 });
 
 test("a rookie forgets what it has searched and a veteran does not", () => {
-  const embassy = () => solo.startSolo({ players: 2, seed: 17, difficulty: "rookie" });
-  const forgetful = embassy();
-  play(forgetful, 90_000);
-  const sharp = solo.startSolo({ players: 2, seed: 17, difficulty: "veteran" });
-  play(sharp, 90_000);
-  // Recall is the only difference in what each remembers about its own searches, and the
-  // veteran keeps everything, so it can never be the one holding less.
-  assert.ok(sharp.cpus[0].searched.size >= forgetful.cpus[0].searched.size);
+  // Measured as recall against its own work, not as a raw count: a rookie rummages through
+  // far more furniture than a veteran, which would flatter it on totals alone.
+  const recall = difficulty => {
+    const state = solo.startSolo({ players: 2, seed: 17, difficulty });
+    for (let t = 0; t < 90_000 && !state.finished; t += 50) solo.stepSolo(state, 50, 0, 0);
+    const memory = state.cpus[0];
+    const opened = state.sim.map.rooms.flatMap(room => room.furniture)
+      .filter(piece => piece.searchedBy.includes(memory.playerId)).length;
+    return { opened, remembered: memory.searched.size };
+  };
+  const rookie = recall("rookie");
+  const veteran = recall("veteran");
+  assert.ok(rookie.opened > 0 && veteran.opened > 0, "both should have searched something");
+  assert.equal(veteran.remembered, veteran.opened, "a veteran forgets nothing it has opened");
+  assert.ok(rookie.remembered < rookie.opened,
+    `a rookie should lose track of some of its own work (${rookie.remembered}/${rookie.opened})`);
 });
 
 test("computer agents never stall against the furniture", () => {
@@ -192,4 +200,24 @@ test("demo mode drives the sim through the public surface only", () => {
   assert.ok(state.sim.players.get(state.cpus[0].playerId).maxHp >= before,
     "a computer agent's ceiling only ever moves the way a vest moves it");
   assert.ok(state.sim.players.get(state.cpus[0].playerId).maxHp <= P.PLAYER_HP_CEILING);
+});
+
+test("a computer agent cannot see which furniture a rival has turned out", () => {
+  const state = solo.startSolo({ players: 2, seed: 41, difficulty: "veteran" });
+  const memory = state.cpus[0];
+  const me = state.sim.players.get(solo.SOLO_PLAYER);
+  // Empty out the whole of some room this agent has never been near.
+  const room = state.sim.map.rooms.find(entry => entry.index !== me.room);
+  for (const piece of room.furniture) {
+    piece.searched = true;
+    piece.emptied = true;
+    piece.searchedBy.push(solo.SOLO_PLAYER);
+  }
+  play(state, 40_000);
+  const ids = new Set(room.furniture.map(piece => piece.id));
+  const learnt = [...memory.searched.keys()].filter(id => ids.has(id));
+  const opened = room.furniture
+    .filter(piece => piece.searchedBy.includes(memory.playerId)).map(piece => piece.id);
+  assert.deepEqual(learnt.sort(), opened.sort(),
+    "it should know only the pieces in that room it opened itself");
 });

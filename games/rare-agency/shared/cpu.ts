@@ -196,13 +196,14 @@ function forgetStale(memory: CpuMemory, now: number): void {
  * Take in the room this agent is standing in.
  *
  * Only this room, and only what is visible in it: the same fog of war the snapshot builder
- * enforces for a human. A piece someone else has emptied is visibly turned out, so that is
- * fair game to notice; a rival two rooms away is not.
+ * enforces for a human. Searching is private, so a piece a rival has turned out looks
+ * untouched to this agent too — it will waste a search on it exactly as you would. What it
+ * knows about its own searching it records when it acts, not by reading the room.
  */
 function observe(sim: MatchSim, memory: CpuMemory, self: SimPlayer): void {
   memory.visited.set(self.room, sim.now);
   for (const piece of sim.map.rooms[self.room].furniture) {
-    if (piece.emptied) memory.searched.set(piece.id, sim.now);
+    if (piece.searchedBy.includes(self.playerId)) memory.searched.set(piece.id, sim.now);
   }
   for (const other of sim.players.values()) {
     if (other.playerId === self.playerId || other.room !== self.room) continue;
@@ -236,7 +237,7 @@ function wantedPiece(
   let best: Furniture | null = null;
   let bestScore = -Infinity;
   for (const piece of sim.map.rooms[room].furniture) {
-    if (piece.emptied || memory.searched.has(piece.id) || memory.abandoned.has(piece.id)) continue;
+    if (memory.searched.has(piece.id) || memory.abandoned.has(piece.id)) continue;
     // Someone who knows the convention goes to the cache. Someone who does not opens
     // whatever is nearest, which is how a rookie ends up rummaging through the bookcases.
     const gap = room === self.room ? Math.hypot(piece.x - self.x, piece.y - self.y) : 0;
@@ -310,7 +311,7 @@ function scoreGoals(sim: MatchSim, memory: CpuMemory, self: SimPlayer): Goal {
   return candidates[0].goal;
 }
 
-/** A doorway or an emptied piece worth rigging, if this agent is carrying anything to rig it with. */
+/** A doorway, or a cache it has emptied itself, worth rigging — if it has anything to rig with. */
 function pickTrap(sim: MatchSim, memory: CpuMemory, self: SimPlayer): Goal | null {
   const trap = TRAP_TYPES.find(type => self.traps[type] > 0);
   if (!trap) return null;
@@ -323,7 +324,7 @@ function pickTrap(sim: MatchSim, memory: CpuMemory, self: SimPlayer): Goal | nul
   }
   // Failing that, the cache it has already turned out: the one place a rival is sure to go.
   for (const piece of room.furniture) {
-    if (piece.slot !== CACHE_SLOT || !piece.emptied) continue;
+    if (piece.slot !== CACHE_SLOT || !memory.searched.has(piece.id)) continue;
     if (sim.traps.has(piece.id) || memory.ownTraps.has(piece.id) || memory.abandoned.has(piece.id)) continue;
     return { kind: "trap", room: self.room, targetId: piece.id, trap, door: null };
   }
@@ -342,7 +343,7 @@ function goalSpent(sim: MatchSim, memory: CpuMemory, self: SimPlayer, goal: Goal
     case "grab": return !sim.drops.some(drop => drop.id === goal.dropId);
     case "search": {
       const piece = sim.map.rooms[goal.room]?.furniture.find(entry => entry.id === goal.furnitureId);
-      return !piece || piece.emptied || memory.searched.has(piece.id);
+      return !piece || memory.searched.has(piece.id);
     }
     case "trap": return sim.traps.has(goal.targetId) || memory.ownTraps.has(goal.targetId);
     case "roam": return self.room === goal.room;

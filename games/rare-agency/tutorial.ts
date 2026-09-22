@@ -158,7 +158,7 @@ export const LESSONS: readonly Lesson[] = Object.freeze([
   {
     id: "strike",
     title: "Strike",
-    body: "F, or the strike button, swings at anyone in arm's reach. A training dummy has been brought in. Hit it.",
+    body: "Space, or the strike button, swings at anyone in arm's reach. A training dummy has been brought in. Hit it.",
     enter: state => {
       const self = trainee(state);
       const target = dummy(state);

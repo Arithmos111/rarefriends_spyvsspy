@@ -400,6 +400,7 @@ function completeBusy(sim: MatchSim, player: SimPlayer): void {
     return;
   }
   piece.searched = true;
+  if (!piece.searchedBy.includes(player.playerId)) piece.searchedBy.push(player.playerId);
   if (piece.contents) {
     const item = piece.contents;
     piece.contents = null;

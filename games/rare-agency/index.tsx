@@ -26,11 +26,12 @@ import {
 } from "./tutorial.ts";
 import {
   drawAgentPortrait, drawCarryableGlyph, drawEmbassy, drawEscapeScene, drawHurtVignette,
-  drawTitleScreen, doorAnchorWorld, ESCAPE_DURATION_MS, HURT_FLASH_MS, unproject,
+  drawTitleScreen, doorAnchorWorld, ESCAPE_DURATION_MS, HIT_MARK_MS, HURT_FLASH_MS, unproject,
   VIEW_H, VIEW_W, type ActiveEffect,
 } from "./render.ts";
 import { createAudio, type Audio, type SoundCue } from "./audio.ts";
 import {
+  ATTACK_COOLDOWN_MS, ATTACK_RANGE, ATTACK_WINDUP_MS,
   DIRECTIONS, INPUT_MS, INTERACT_RANGE, MATCH_SECONDS, MAX_FRIEND_NAME, MISSION_ITEMS, TICK_MS,
   MISSION_ITEM_LABELS, POWER_UP_BLURBS, POWER_UP_LABELS, ROOM_H, ROOM_W, TRAP_LABELS,
   TRAP_TYPES, canonicalDoorTrapId, carryableLabel, displayName, isDoorTrapId,
@@ -200,6 +201,12 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const demoEndedRef = useRef(false);
   /** The room a relay-free match last reported, so room changes can be noticed locally. */
   const localRoomRef = useRef<number | null>(null);
+  /** The player's own swing and cooldown, predicted rather than waited for. */
+  const swingRef = useRef({ until: 0, readyAt: 0 });
+  /** When the last blow of this player's landed, for the confirmation on the target mark. */
+  const hitFlashRef = useRef(0);
+  /** Mirrors the cooldown into React, so the strike button can grey out with the ring. */
+  const [strikeReadyAt, setStrikeReadyAt] = useState(0);
   /**
    * Raise the end of a demo match: the departure sequence if somebody made the gate, then the
    * same recap a live match shows. No career standing is attached, because none was earned —
@@ -259,6 +266,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     setDemo(state);
     demoRef.current = state;
     mapRef.current = state.sim.map;
+    swingRef.current = { until: 0, readyAt: 0 };
     walkToRef.current = null;
     localRoomRef.current = state.sim.players.get(SOLO_PLAYER)!.room;
     setVisitedRooms(new Set<number>([localRoomRef.current]));
@@ -279,6 +287,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     // The renderer needs the map, which in a live match arrives with match.start. The
     // rehearsal has no relay, so take the map straight off the sim it is stepping.
     mapRef.current = state.sim.map;
+    swingRef.current = { until: 0, readyAt: 0 };
     walkToRef.current = null;
     localRoomRef.current = state.sim.players.get(TRAINEE)!.room;
     setVisitedRooms(new Set<number>([localRoomRef.current]));
@@ -392,7 +401,13 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         shakeRef.current = Math.max(shakeRef.current, reducedRef.current ? 0 : value.amount >= 2 ? 13 : 8);
         hurtFlashRef.current = performance.now();
         break;
-      case "hit": play(value.amount >= 2 ? "hit-heavy" : "hit"); break;
+      case "hit":
+        play(value.amount >= 2 ? "hit-heavy" : "hit");
+        // A short punch, well under the one for taking a blow, so landing one is felt rather
+        // than only heard. The mark over the target thickens for a moment too.
+        shakeRef.current = Math.max(shakeRef.current, reducedRef.current ? 0 : 4);
+        hitFlashRef.current = performance.now();
+        break;
       case "heal": play("heal"); break;
       case "takedown": play("takedown"); break;
       case "downed":
@@ -480,6 +495,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         setResults(null);
         setFeed([]);
         seqRef.current = 1;
+        swingRef.current = { until: 0, readyAt: 0 };
         break;
       }
       case "snapshot": {
@@ -613,8 +629,13 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     door: Direction | null;
     /** The trap on whatever is currently in reach, if the viewer can see it. */
     trapHere: MatchSnapshot["traps"][number] | null;
+    /** The rival a strike would land on right now, computed the way the sim picks one. */
+    victim: MatchSnapshot["actors"][number] | null;
   };
-  const emptyTargets: Targets = { furniture: null, drop: null, atGate: false, nearest: null, door: null, trapHere: null };
+  const emptyTargets: Targets = {
+    furniture: null, drop: null, atGate: false, nearest: null, door: null, trapHere: null,
+    victim: null,
+  };
   const targetsRef = useRef<Targets>(emptyTargets);
   const [targets, setTargets] = useState<Targets>(emptyTargets);
 
@@ -642,6 +663,16 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       if (gap <= doorGap) { doorGap = gap; door = direction; }
     }
 
+    // Whoever a swing would connect with: the sim picks the nearest reachable rival, and so
+    // does this, so the mark on screen and the blow that lands agree.
+    let victim: MatchSnapshot["actors"][number] | null = null;
+    let victimGap = ATTACK_RANGE;
+    for (const actor of snapshot.actors) {
+      if (actor.invulnerableMs > 0) continue;
+      const gap = distance(x, y, actor.x, actor.y);
+      if (gap <= victimGap) { victimGap = gap; victim = actor; }
+    }
+
     const furniture = nearestGap <= INTERACT_RANGE ? nearest : null;
     // Prefer whichever of the two is actually closer, so a doorway beside a cabinet is not
     // permanently shadowed by it.
@@ -656,6 +687,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       nearest,
       door: preferDoor ? door : null,
       trapHere: targetId === null ? null : snapshot.traps.find(entry => entry.targetId === targetId) ?? null,
+      victim,
     };
   }, []);
 
@@ -668,11 +700,23 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   }, []);
 
   /**
-   * Swinging is predicted locally for its sound: waiting for the server to confirm the blow
-   * would put the swish a round trip behind the animation. Whether it connects is still the
-   * server's call, and arrives as a hurt/takedown cue.
+   * Swinging is predicted locally — the sound, the weapon coming out, and the cooldown.
+   *
+   * Waiting for the server to confirm a blow puts the whole swing a round trip behind the
+   * key, which is indistinguishable from the game ignoring you. Whether it connects is still
+   * the server's call and arrives as a hurt/hit/takedown cue; only the swing itself is
+   * predicted. The local cooldown matches the sim's, so a mashed key is swallowed here
+   * instead of being sent and silently dropped, which is what made a fight feel dead.
    */
   const swing = useCallback(() => {
+    const now = performance.now();
+    if (now < swingRef.current.readyAt) return;
+    // The sim refuses a swing from someone mid-search or stunned, so predicting one here
+    // would be a lie on screen. Predict only what the server will agree to.
+    const self = matchRef.current?.self;
+    if (self && (self.busy || self.stunnedMs > 0 || self.respawnMs > 0)) return;
+    swingRef.current = { until: now + ATTACK_WINDUP_MS, readyAt: now + ATTACK_COOLDOWN_MS };
+    setStrikeReadyAt(swingRef.current.readyAt);
     audioRef.current?.play(matchRef.current?.self.hasKnife ? "knife" : "search");
     sendAction({ kind: "attack" });
   }, [sendAction]);
@@ -714,8 +758,11 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       if (event.repeat) return;
       if (key === "escape") { setMenu(null); return; }
       if (menuRef.current) return;
-      if (key === "e" || key === " ") { event.preventDefault(); primaryAction(); }
-      else if (key === "f") { event.preventDefault(); swing(); }
+      // Space strikes, because striking is the thing you do under pressure and it is the
+      // biggest key on the board. E is the context action — search, pick up, get out — and F
+      // stays bound to the strike for anyone who learned it that way.
+      if (key === " " || key === "f") { event.preventDefault(); swing(); }
+      else if (key === "e") { event.preventDefault(); primaryAction(); }
       else if (key === "q") { event.preventDefault(); setMenu("traps"); }
       else if (key === "1" || key === "2" || key === "3") {
         event.preventDefault();
@@ -974,6 +1021,10 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           nearestFurnitureId: targetsRef.current.furniture?.id ?? null,
           nearestDropId: targetsRef.current.drop?.id ?? null,
           nearestDoor: targetsRef.current.door,
+          targetActorId: targetsRef.current.victim?.playerId ?? null,
+          selfAttackingMs: Math.max(0, swingRef.current.until - nowMs),
+          selfCooldownMs: Math.max(0, swingRef.current.readyAt - nowMs),
+          selfHitMs: Math.max(0, HIT_MARK_MS - (nowMs - hitFlashRef.current)),
           effects: live,
           reducedMotion: reducedRef.current,
           timeMs: nowMs,
@@ -1179,6 +1230,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       onLeaveTutorial={endTutorial}
       demoLabel={demo ? DIFFICULTY_LABELS[demo.difficulty] : null}
       onLeaveDemo={endDemo}
+      strikeReadyAt={strikeReadyAt}
       onSettings={() => setMenu("settings")}
       stickRef={stickRef} inputBlocked={inputBlocked} reducedMotion={reducedMotion}
       netStatus={netStatus} artworkFailed={artworkFailed} onRetryArtwork={retryArtwork}
@@ -1437,7 +1489,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         </label>
         <p className="er-fine">
           Movement: WASD or arrow keys, or the on-screen stick. E or the action button searches, picks up
-          and escapes. F strikes. Q or the trap button sets a trap; 1, 2 and 3 set one directly.
+          and escapes. Space strikes. Q or the trap button sets a trap; 1, 2 and 3 set one directly.
         </p>
         <p className="er-fine">
           All RF balances, crates, kits and redemptions are simulated by FriendSDK's preview client.
@@ -1673,8 +1725,10 @@ function MatchScreen(props: any) {
     artworkFailed, onRetryArtwork, flashes, visitedRooms, exitRoom,
     lesson, lessonIndex, lessonCount, tutorialDone, lessonHidden,
     onHideLesson, onShowLesson, onSkipLesson, onLeaveTutorial,
-    demoLabel, onLeaveDemo,
+    demoLabel, onLeaveDemo, strikeReadyAt,
   } = props;
+  // Re-rendered with every snapshot at the relay's tick rate, so this clears within a tick.
+  const striking = performance.now() < strikeReadyAt;
   const self = match.self as MatchSnapshot["self"];
   const minutes = Math.floor(match.secondsLeft / 60);
   const seconds = String(match.secondsLeft % 60).padStart(2, "0");
@@ -1722,7 +1776,7 @@ function MatchScreen(props: any) {
     <div className="er-stage">
       <canvas ref={canvasRef} width={VIEW_W} height={VIEW_H} className="er-canvas" tabIndex={0}
         onPointerDown={event => { event.currentTarget.focus({ preventScroll: true }); onCanvasPointer(event); }}
-        aria-label={`Embassy room ${match.roomName}. Move with WASD, arrow keys or the on-screen stick. E searches, F strikes, Q sets a trap.`} />
+        aria-label={`Embassy room ${match.roomName}. Move with WASD, arrow keys or the on-screen stick. E searches, space strikes, Q sets a trap.`} />
 
       {down && <div className="er-down" role="status">
         <strong>Taken out</strong>
@@ -1767,8 +1821,15 @@ function MatchScreen(props: any) {
           onClick={onPrimary}>{primaryLabel}<small>E</small></button>
         <button type="button" className="er-action" disabled={inputBlocked || down || !canTrap}
           onClick={onTraps}>{targets.door ? "Trap door" : "Trap"}<small>{trapTotal} · Q</small></button>
-        <button type="button" className="er-action" disabled={inputBlocked || down}
-          onClick={onAttack}>Strike<small>F</small></button>
+        {/* Three states, because "nothing happened" used to cover all three: ready with
+            somebody in reach, ready with nobody in reach, and still on cooldown. */}
+        <button type="button"
+          className={`er-action${targets.victim && !striking ? " er-action-armed" : ""}`}
+          disabled={inputBlocked || down || striking}
+          onClick={onAttack}>
+          Strike
+          <small>{striking ? "…" : targets.victim ? `${targets.victim.codename} · Space` : "Space"}</small>
+        </button>
         {self.hasDisarm && <button type="button" className="er-action"
           disabled={inputBlocked || down || !targets.trapHere}
           onClick={onDisarm}>Disarm<small>{targets.trapHere?.mine ? "yours" : "rival"}</small></button>}

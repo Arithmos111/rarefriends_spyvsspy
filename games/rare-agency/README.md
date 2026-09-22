@@ -82,7 +82,7 @@ is a live match with the relay taken out. See
 | Tap or click the floor | Walk to that spot |
 | Tap or click furniture in reach | Search it |
 | **E** or the action button | Search, pick up, or escape — whichever is in reach |
-| **F** | Strike the nearest agent |
+| **Space** (or **F**) | Strike the nearest agent |
 | **Q** or the trap button | Open the trap menu for the furniture **or doorway** you are standing at |
 | **1 / 2 / 3** | Set a letter bomb, spring trap or water bucket directly |
 | **Esc** | Close a menu |
@@ -90,6 +90,19 @@ is a live match with the relay taken out. See
 Strikes point where you are facing. A bare fist thrusts out on a short forearm; the stiletto
 is drawn as a blade — tapered point, crossguard and grip — and stabs out along your facing and
 back, which is what makes a near miss readable rather than a flash around the body.
+
+Three things keep a fight legible. The swing itself is **predicted locally** — the weapon comes
+out on the keypress rather than a round trip later; whether it connects is still the server's
+call and arrives as a cue. Red brackets close over **whoever a strike would land on**, so being
+in reach is something you can see before you commit, and they snap shut in green for a moment
+when your blow lands. A ring sweeps round your own feet while the strike is on **cooldown**, and
+the strike button greys out with it, so "I missed", "nobody was in reach" and "I was not ready
+yet" stop looking like the same nothing.
+
+Searching is private. You see the drawers **you** have been through; a piece a rival turned out
+still looks untouched to you, and you pay the 0.9s to find out it is empty. Traps are private
+the same way — only the agent who set one can see it, and only a **trap detector** reveals
+anybody else's, which is what that power-up is for.
 
 Every trap has its own detonation, in the world and in the ear: a letter bomb throws a
 shockwave and soot, a spring trap snaps shut in a metal star, a water bucket tips and splashes,

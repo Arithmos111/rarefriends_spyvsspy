@@ -10,7 +10,7 @@
  */
 import { spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/sprites";
 import {
-  ATTACK_WINDUP_MS, DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FURNITURE_FOOTPRINT, MISSION_ITEMS,
+  ATTACK_COOLDOWN_MS, ATTACK_WINDUP_MS, DOOR_HALF_WIDTH, EFFECT_DURATION_MS, FURNITURE_FOOTPRINT, MISSION_ITEMS,
   PROP_SURFACES, ROOM_H, ROOM_PROPS, ROOM_W, type PropKind,
   carryableLabel, isDoorTrapId, isWallMounted, roomSignPlacement,
   type Carryable, type DecorType, type Direction, type EffectKind, type FurnitureType,
@@ -83,6 +83,24 @@ export type RenderInput = {
   nearestDropId: number | null;
   /** Doorway the agent is standing close enough to trap. */
   nearestDoor: Direction | null;
+  /**
+   * The rival a strike would land on right now, marked so you can see the blow is on before
+   * you throw it. Knowing you are in reach is most of what makes a fight readable.
+   */
+  targetActorId: string | null;
+  /**
+   * The player's own swing, predicted locally rather than waited for.
+   *
+   * A strike that only animates once the server has confirmed it is a round trip behind the
+   * key, which reads as the game ignoring you. The blow's outcome is still the server's call;
+   * only the weapon coming out is predicted, and it is a strict maximum with the authoritative
+   * value, so a swing the server refused simply finishes early rather than being invented.
+   */
+  selfAttackingMs: number;
+  /** Milliseconds until the player may strike again, for the readiness ring under their feet. */
+  selfCooldownMs: number;
+  /** Time left on the confirmation flash after one of this player's blows landed. */
+  selfHitMs: number;
   /** Trap detonations and landed blows currently running in this room. */
   effects: readonly ActiveEffect[];
   reducedMotion: boolean;
@@ -158,6 +176,17 @@ export function drawEmbassy(context: CanvasRenderingContext2D, input: RenderInpu
       draw: () => drawAgent(context, actor, actor.playerId === snapshot.self.playerId, input),
     });
   }
+  // Drawn last of all, so nothing standing in front of the target can hide the mark.
+  layers.push({
+    depth: Number.POSITIVE_INFINITY,
+    draw: () => {
+      const target = snapshot.actors.find(actor => actor.playerId === input.targetActorId);
+      if (target) {
+        drawTargetMark(context, target.x, target.y,
+          input.selfCooldownMs <= 0, input.selfHitMs > 0, timeMs, reducedMotion);
+      }
+    },
+  });
 
   layers.sort((left, right) => left.depth - right.depth);
   for (const layer of layers) layer.draw();
@@ -1357,6 +1386,61 @@ function drawDrop(
  * row 15, white one-pixel halo then the black mask, clipped to the box. Nothing is rotated,
  * scaled fractionally, recoloured or regenerated.
  */
+/**
+ * The mark over whoever a strike would land on.
+ *
+ * Combat was hard to read because nothing said you were in reach: you swung, and either a
+ * number appeared or it did not. This puts the answer on screen before the blow — brackets
+ * closing on the target when the strike is ready, held open and dimmed while it is on
+ * cooldown, so "I missed" and "I was not ready" stop looking the same.
+ */
+function drawTargetMark(
+  context: CanvasRenderingContext2D, worldX: number, worldY: number,
+  ready: boolean, justHit: boolean, timeMs: number, reducedMotion: boolean,
+): void {
+  const [x, y] = project(worldX, worldY);
+  const centreY = Math.round(y) - 34;
+  const pulse = reducedMotion ? 0 : Math.sin(timeMs / 140) * 2;
+  // A landed blow snaps the brackets shut and thickens them, which is the confirmation the
+  // floating number alone was not giving in a busy room.
+  const spread = justHit ? 16 : ready ? 22 + pulse : 30;
+  const arm = justHit ? 12 : 9;
+
+  context.save();
+  context.lineWidth = justHit ? 5 : 3;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = justHit ? SIGNAL : ready ? ALERT : "rgba(238,241,228,0.55)";
+  for (const side of [-1, 1]) {
+    const edge = Math.round(x) + side * spread;
+    context.beginPath();
+    context.moveTo(edge - side * arm, centreY - 14);
+    context.lineTo(edge, centreY - 14);
+    context.lineTo(edge, centreY + 14);
+    context.lineTo(edge - side * arm, centreY + 14);
+    context.stroke();
+  }
+  context.restore();
+}
+
+/**
+ * The ring at the player's own feet: full while the strike is ready, sweeping back round as
+ * the cooldown runs off. Mashing a button that is not listening yet is the other half of why
+ * a fight reads as unresponsive.
+ */
+function drawReadyRing(
+  context: CanvasRenderingContext2D, x: number, y: number, cooldownMs: number,
+): void {
+  const fraction = 1 - Math.max(0, Math.min(1, cooldownMs / ATTACK_COOLDOWN_MS));
+  context.save();
+  context.lineWidth = 3;
+  context.strokeStyle = fraction >= 1 ? SIGNAL : "rgba(238,241,228,0.6)";
+  context.beginPath();
+  context.ellipse(x, y, 21, 9, 0, -Math.PI / 2, -Math.PI / 2 + fraction * Math.PI * 2);
+  context.stroke();
+  context.restore();
+}
+
 function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: boolean, input: RenderInput): void {
   const [x, y] = project(actor.x, actor.y);
   const left = Math.round(x) - 40;
@@ -1368,6 +1452,11 @@ function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: 
   context.fillStyle = "rgba(20,24,15,0.25)";
   context.fill();
   context.restore();
+
+  // Only while it means something: a permanent full ring would just be furniture.
+  if (isSelf && input.selfCooldownMs > 0) {
+    drawReadyRing(context, Math.round(x), Math.round(y), input.selfCooldownMs);
+  }
 
   const entry = input.sprites.get(actor.friendId);
   if (entry && entry !== "loading" && entry !== "error") {
@@ -1477,13 +1566,16 @@ function drawAgent(context: CanvasRenderingContext2D, actor: RoomActor, isSelf: 
     context.restore();
   }
 
-  if (actor.attackingMs > 0) {
+  // The player's own swing runs on the local prediction when that is ahead of the snapshot,
+  // so the weapon comes out on the keypress rather than a round trip later.
+  const attackingMs = isSelf ? Math.max(actor.attackingMs, input.selfAttackingMs) : actor.attackingMs;
+  if (attackingMs > 0) {
     // Thrust out along the way the agent is facing, and back again, so a blow reads as
     // aimed rather than as a flash around the body. Spy vs Spy's whole tell was the weapon
     // sticking out in front of you, and it is what makes a near miss legible.
     const swing = input.reducedMotion
       ? 0.6
-      : 1 - Math.max(0, Math.min(1, actor.attackingMs / ATTACK_WINDUP_MS));
+      : 1 - Math.max(0, Math.min(1, attackingMs / ATTACK_WINDUP_MS));
     const reach = Math.sin(Math.max(0, Math.min(1, swing)) * Math.PI);
     const [dx, dy] = facingScreenDir(actor.facing);
     const handX = Math.round(x) + dx * 10;
@@ -1726,6 +1818,9 @@ function drawEffect(
 }
 
 /** How long the red edge lingers after taking a blow. */
+/** How long the target mark stays snapped shut after one of your blows lands. */
+export const HIT_MARK_MS = 220;
+
 export const HURT_FLASH_MS = 420;
 
 /**

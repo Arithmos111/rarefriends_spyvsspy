@@ -351,6 +351,10 @@
 }
 .er-action small { font-size: 0.72em; font-weight: 400; color: var(--muted); }
 .er-action-primary { background: var(--signal); }
+/* Somebody is in reach and the strike is ready: the one moment the button is worth pressing. */
+.er-shell .er-action-armed { background: var(--alert); color: var(--paper); }
+.er-shell .er-action-armed small { color: var(--paper); opacity: .85; }
+.er-shell .er-action-armed:hover:not(:disabled) { background: #f06a42; }
 
 /* ---- Results ------------------------------------------------------------------------ */
 

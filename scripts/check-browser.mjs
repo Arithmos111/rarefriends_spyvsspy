@@ -380,6 +380,21 @@ try {
   await one.child.getByRole("button", { name: /^Strike/ }).waitFor({ timeout: 10000 });
   step("returned to the match after the trap menu");
 
+  // Space strikes, and the button's own label says so rather than naming the old key.
+  const strike = one.child.getByRole("button", { name: /^Strike/ });
+  assert.match(await strike.innerText(), /Space/i, "the strike button should name the space bar");
+
+  // Pressing it must put the swing on cooldown immediately, without waiting on the relay:
+  // that local prediction is the whole point, so assert the button goes dead on the keypress.
+  await one.child.locator("canvas.er-canvas").click({ position: { x: 5, y: 5 } });
+  await one.page.keyboard.press("Space");
+  await one.page.waitForTimeout(60);
+  assert.equal(await strike.isDisabled(), true,
+    "the strike should go on cooldown on the keypress, not a round trip later");
+  await one.page.waitForTimeout(900);
+  assert.equal(await strike.isDisabled(), false, "and come back when the cooldown runs out");
+  step("space strikes, and the cooldown is predicted locally");
+
   // The career leaderboard is reachable and reflects finished matches only.
   const scoreNames = await one.child.locator(".er-scores .er-score-name").allInnerTexts();
   assert.equal(scoreNames.length, 2, "both agents should appear on the scoreboard");
