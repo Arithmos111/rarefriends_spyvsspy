@@ -26,7 +26,7 @@ npm run dev
 
 ## Play
 
-The game opens on your agent at portrait scale, then a title screen offering a **Training run**: nine steps through every control against the real simulation, needing no relay, lobby or second player.
+The game opens on your agent at portrait scale, then a title screen offering a **Training run** — nine steps through every control — and a **Demo match** against one to three computer agents: a real five-minute match, escape sequence and recap included, that never touches the standings. Both run in the browser with no relay, lobby or second player. Rookie, Field agent and Veteran change how fast the opposition reacts and how much it remembers, never how hard it hits; it sees only the room it stands in and walks into your traps.
 
 Move with WASD, arrow keys, the on-screen stick or by tapping a destination. **E** searches, picks up and escapes through the gate, whichever is in reach; **F** strikes the way you are facing; **Q** opens the trap menu for the furniture or doorway you are at, and **1**–**3** set a trap directly. The header carries a plan of the embassy, a four-slot mission track and a health bar. Settings (≡) hold mute, music and reduced motion. Everything stays in the SDK's 960 × 640 container, keyboard and touch alike.
 
@@ -60,7 +60,7 @@ Weights total exactly **10,000 basis points**; expected reward **0.905 RF per cr
 
 ## Checks, credits and limitations
 
-`npm run check` runs typecheck, **62 simulation tests**, game validation and two browser checks. **All pass.** The tests cover map determinism, reachability, two-way doorway traps, searching, combat, power-ups, escaping, the timer, career scoring, and step-for-step agreement between the client's prediction and the server. Validation reports `games/rare-agency: valid`, 10,000 bps, 0.905 RF expected, 8 RF maximum. The browser check drives **two** real browsers through the SDK ownership gate, asserts container bounds at desktop and phone widths, buys and opens a crate, walks the training run and plays a live match in a shared lobby; a second proves the reverse-proxy topology the preview runs behind.
+`npm run check` runs typecheck, **97 simulation tests**, game validation and two browser checks. **All pass.** The tests cover map determinism, reachability, two-way doorway traps, searching, combat, power-ups, escaping, the timer, career scoring, the end-of-match recap, the lobby's ready timeout, and step-for-step agreement between the client's prediction and the server; they also play whole matches against the computer agents, which never walk through a wall, stall, or know a room they have not stood in. Validation reports `games/rare-agency: valid`, 10,000 bps, 0.905 RF expected, 8 RF maximum. The browser check drives **two** real browsers through the SDK ownership gate, asserts container bounds at desktop and phone widths, buys and opens a crate, walks the training run, plays a four-agent demo match and plays a live match in a shared lobby; a second proves the reverse-proxy topology the preview runs behind.
 
 Browser tests use the SDK's own identity fixture for mocked wallets and RPC. **A real-wallet playthrough has been done against the hosted preview**, which is how the wrong-network problem reported to the SDK team was found — since fixed upstream in v0.1.2.
 

@@ -45,11 +45,18 @@ import {
 } from "./shared/mansion.ts";
 import { KITS, FIELD_KIT_ID, kitById } from "./shared/loadouts.ts";
 import { movePlayer, type Facing } from "./shared/sim.ts";
+import {
+  SOLO_PLAYER, soloAction, soloRecap, soloSnapshot, soloWon, startSolo, stepSolo,
+  type SoloState,
+} from "./solo.ts";
+import {
+  DIFFICULTIES, DIFFICULTY_BLURBS, DIFFICULTY_LABELS, type Difficulty,
+} from "./shared/cpu.ts";
 import "./style.css";
 
 type Screen = "confirm" | "title" | "briefing" | "lobby" | "match" | "escape" | "results";
 type Menu = "crate" | "kits" | "settings" | "join" | "create" | "reveal" | "traps"
-  | "leaderboard" | "codename" | null;
+  | "leaderboard" | "codename" | "demo" | null;
 
 /** A centre-screen flash when something is picked up or goes wrong. */
 type Flash = { id: number; item: Carryable | null; title: string; detail: string; tone: "good" | "bad"; at: number };
@@ -170,6 +177,13 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const [tutorialDone, setTutorialDone] = useState(false);
   /** Collapses the objective card so the room underneath can be experimented with. */
   const [lessonHidden, setLessonHidden] = useState(false);
+  /** A demo match against computer agents, when one is in progress. Also relay-free. */
+  const [demo, setDemo] = useState<SoloState | null>(null);
+  const demoRef = useRef<SoloState | null>(null);
+  demoRef.current = demo;
+  /** Remembered between demo matches, so "play again" needs no second trip through the menu. */
+  const [demoDifficulty, setDemoDifficulty] = useState<Difficulty>("agent");
+  const [demoOpponents, setDemoOpponents] = useState(1);
 
   /** Leave the training run and hand the screen back to the briefing. */
   const endTutorial = useCallback(() => {
@@ -182,6 +196,80 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     matchRef.current = null;
   }, []);
 
+  /** Latched when a demo match's result has been raised, so it is raised exactly once. */
+  const demoEndedRef = useRef(false);
+  /** The room a relay-free match last reported, so room changes can be noticed locally. */
+  const localRoomRef = useRef<number | null>(null);
+  /**
+   * Raise the end of a demo match: the departure sequence if somebody made the gate, then the
+   * same recap a live match shows. No career standing is attached, because none was earned —
+   * nothing played against a computer is sent to the relay or counted on the leaderboard.
+   */
+  const finishDemo = useCallback((state: SoloState) => {
+    const won = soloWon(state);
+    const winner = state.sim.winner ? state.sim.players.get(state.sim.winner) : null;
+    setResults({
+      winnerName: winner?.codename ?? null,
+      reason: state.sim.endReason,
+      results: soloSnapshot(state).scoreboard,
+      recap: soloRecap(state),
+      career: null,
+    });
+    setMatch(null);
+    matchRef.current = null;
+    if (state.sim.escaped && winner) {
+      setEscape({
+        startedAt: performance.now(), won,
+        codename: winner.codename, friendName: winner.friendName ?? null,
+      });
+      audioRef.current?.play("escape");
+    } else {
+      audioRef.current?.play(won ? "escape" : "lose");
+    }
+    soundRef.current?.play(won ? "reward" : "reveal-common");
+  }, []);
+  const finishDemoRef = useRef(finishDemo);
+  finishDemoRef.current = finishDemo;
+
+  /** Leave the demo and hand the screen back to the briefing. */
+  const endDemo = useCallback(() => {
+    demoRef.current = null;
+    demoEndedRef.current = false;
+    mapRef.current = null;
+    setDemo(null);
+    setMatch(null);
+    matchRef.current = null;
+    setEscape(null);
+    setResults(null);
+  }, []);
+
+  /**
+   * Start a demo match. Same staging as the training run: seed the first snapshot here,
+   * because the render loop only runs on the match screen and the match screen only appears
+   * once there is a snapshot to draw.
+   */
+  const beginDemo = useCallback((difficulty: Difficulty, opponents: number) => {
+    const state = startSolo({
+      difficulty, players: opponents + 1,
+      friendId: String(friendId),
+      codename: identity?.codename ?? "AGENT",
+      kitId: equippedKit,
+    });
+    demoEndedRef.current = false;
+    setDemo(state);
+    demoRef.current = state;
+    mapRef.current = state.sim.map;
+    walkToRef.current = null;
+    localRoomRef.current = state.sim.players.get(SOLO_PLAYER)!.room;
+    setVisitedRooms(new Set<number>([localRoomRef.current]));
+    setResults(null);
+    setEscape(null);
+    const view = soloSnapshot(state);
+    matchRef.current = view;
+    setMatch(view);
+    setFeed([]);
+  }, [friendId, identity?.codename, equippedKit]);
+
   const beginTutorial = useCallback(() => {
     const state = startTutorial(0);
     setTutorialDone(false);
@@ -192,7 +280,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     // rehearsal has no relay, so take the map straight off the sim it is stepping.
     mapRef.current = state.sim.map;
     walkToRef.current = null;
-    setVisitedRooms(new Set<number>());
+    localRoomRef.current = state.sim.players.get(TRAINEE)!.room;
+    setVisitedRooms(new Set<number>([localRoomRef.current]));
     setResults(null);
     // Publish the opening view synchronously. The match screen owns the canvas the render
     // loop draws into, and the loop only runs on the match screen, so without a first
@@ -572,8 +661,9 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
 
   // ---- Input ----------------------------------------------------------------------------
   const sendAction = useCallback((action: Parameters<Net["send"]>[0] extends never ? never : any) => {
-    // The training run resolves actions locally; nothing about it touches the relay.
+    // The training run and demo mode both resolve actions locally; neither touches the relay.
     if (tutorialRef.current) { tutorialAction(tutorialRef.current, action); return; }
+    if (demoRef.current) { soloAction(demoRef.current, action); return; }
     netRef.current?.send({ t: "action", seq: seqRef.current++, action });
   }, []);
 
@@ -680,7 +770,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   // Input transmission at a fixed rate, independent of frame rate.
   useEffect(() => {
     const timer = setInterval(() => {
-      if (screenRef.current !== "match" || tutorialRef.current) return;
+      if (screenRef.current !== "match" || tutorialRef.current || demoRef.current) return;
       const [dx, dy] = inputVector();
       netRef.current?.send({ t: "input", seq: seqRef.current++, dx, dy });
     }, INPUT_MS);
@@ -744,12 +834,64 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         };
       }
 
+      // Demo mode, likewise: the real match, stepped here, with computer agents filling the
+      // other seats. It differs from the rehearsal only in that it can actually end.
+      const demoRun = demoRef.current;
+      if (demoRun && !demoRun.finished) {
+        const blocked = pausedRef.current || menuRef.current !== null;
+        const [dx, dy] = blocked ? [0, 0] : inputVector();
+        stepSolo(demoRun, delta, dx, dy);
+
+        if (demoRun.sim.cues.length) {
+          for (const entry of demoRun.sim.cues) if (entry.to === SOLO_PLAYER) handleCue(entry);
+          demoRun.sim.cues.length = 0;
+        }
+        if (demoRun.sim.events.length) {
+          const mine = demoRun.sim.events.filter(entry => !entry.to || entry.to === SOLO_PLAYER);
+          demoRun.sim.events.length = 0;
+          if (mine.length) setFeed(current => [...current, ...mine].slice(-6));
+        }
+
+        const view = soloSnapshot(demoRun);
+        matchRef.current = view;
+        publishDue -= delta;
+        if (publishDue <= 0) {
+          publishDue = TICK_MS;
+          setMatch(view);
+        }
+        const agent = demoRun.sim.players.get(SOLO_PLAYER)!;
+        predictedRef.current = {
+          room: agent.room, x: agent.x, y: agent.y,
+          facing: agent.facing, walking: agent.walking,
+        };
+      }
+
+      // Walking into a new room is noted by the relay's snapshot handler in a live match.
+      // The training run and demo mode have no relay, so do it here: the minimap fills in
+      // and the door sound plays exactly as they do online.
+      const local = rehearsal ?? demoRun;
+      if (local) {
+        const room = matchRef.current?.roomIndex;
+        if (room !== undefined && room !== localRoomRef.current) {
+          localRoomRef.current = room;
+          setVisitedRooms(current => current.has(room) ? current : new Set(current).add(room));
+          audioRef.current?.play("door");
+        }
+      }
+
+      // Escaping resolves through an action rather than a tick, so the end is checked here
+      // rather than inside the step, and latched so the recap is only raised once.
+      if (demoRun && demoRun.finished && !demoEndedRef.current) {
+        demoEndedRef.current = true;
+        finishDemoRef.current(demoRun);
+      }
+
       const snapshot = matchRef.current;
       const embassy = mapRef.current;
       if (snapshot && embassy) {
         const self = snapshot.self;
         ensureSprites([self.friendId, ...snapshot.actors.map(actor => actor.friendId)]);
-        const canMove = !rehearsal && !self.busy && self.stunnedMs <= 0
+        const canMove = !rehearsal && !demoRun && !self.busy && self.stunnedMs <= 0
           && self.respawnMs <= 0 && !pausedRef.current;
         if (canMove) {
           const [dx, dy] = inputVector();
@@ -996,6 +1138,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       career={careerOf(leaderboard, friendId)} netStatus={netStatus}
       onStart={() => { void audioRef.current?.unlock(); setAtTitle(false); }}
       onTutorial={() => { void audioRef.current?.unlock(); setAtTitle(false); beginTutorial(); }}
+      onDemo={() => { void audioRef.current?.unlock(); setAtTitle(false); setMenu("demo"); }}
       onStandings={() => setMenu("leaderboard")}
     />}
 
@@ -1009,6 +1152,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       onOpen={() => void openCrate()}
       onSetMenu={setMenu} onQuick={quickMatch} onJoin={joinLobby}
       onTutorial={() => { void audioRef.current?.unlock(); beginTutorial(); }}
+      onDemo={() => { void audioRef.current?.unlock(); setMenu("demo"); }}
       pendingPlay={Boolean(pendingPlay)}
     />}
 
@@ -1033,6 +1177,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
       onShowLesson={() => setLessonHidden(false)}
       onSkipLesson={() => { if (tutorialRef.current) advanceTutorial(tutorialRef.current); }}
       onLeaveTutorial={endTutorial}
+      demoLabel={demo ? DIFFICULTY_LABELS[demo.difficulty] : null}
+      onLeaveDemo={endDemo}
       onSettings={() => setMenu("settings")}
       stickRef={stickRef} inputBlocked={inputBlocked} reducedMotion={reducedMotion}
       netStatus={netStatus} artworkFailed={artworkFailed} onRetryArtwork={retryArtwork}
@@ -1045,16 +1191,62 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
     />}
 
     {screen === "results" && results && <ResultsScreen
-      results={results} identity={identity} onBack={leaveLobby}
-      onAgain={() => { setResults(null); }} inLobby={Boolean(lobby)}
+      results={results} identity={identity}
+      demo={Boolean(demo)}
+      demoLabel={demo ? DIFFICULTY_LABELS[demo.difficulty] : null}
+      onBack={demo ? endDemo : leaveLobby}
+      onAgain={demo
+        ? () => { endDemo(); beginDemo(demoDifficulty, demoOpponents); }
+        : () => { setResults(null); }}
+      inLobby={Boolean(lobby)}
     />}
 
     {menu && <GameMenu
       title={menu === "crate" ? "Gadget crate" : menu === "kits" ? "Your kits" : menu === "settings" ? "Settings"
         : menu === "join" ? "Join by code" : menu === "create" ? "Create a lobby"
         : menu === "reveal" ? "Crate opened" : menu === "leaderboard" ? "Career standings"
-        : menu === "codename" ? "Name your Friend" : "Set a trap"}
+        : menu === "codename" ? "Name your Friend" : menu === "demo" ? "Demo match" : "Set a trap"}
       onClose={busy ? undefined : () => setMenu(null)}>
+
+      {menu === "demo" && <div className="er-menu">
+        <p>
+          A full match against computer agents, run entirely in this browser. Same rules, same
+          five-minute clock, same four items. Nothing here reaches the relay, so a demo match
+          never counts towards the career standings.
+        </p>
+        <fieldset className="er-choice">
+          <legend>Opposition</legend>
+          <div className="er-row">
+            {[1, 2, 3].map(count => <button type="button" key={count}
+              aria-pressed={demoOpponents === count}
+              className={demoOpponents === count ? "er-primary" : ""}
+              onClick={() => setDemoOpponents(count)}>
+              {count} {count === 1 ? "agent" : "agents"}
+            </button>)}
+          </div>
+        </fieldset>
+        <fieldset className="er-choice">
+          <legend>How good they are</legend>
+          <div className="er-row">
+            {DIFFICULTIES.map(level => <button type="button" key={level}
+              aria-pressed={demoDifficulty === level}
+              className={demoDifficulty === level ? "er-primary" : ""}
+              onClick={() => setDemoDifficulty(level)}>
+              {DIFFICULTY_LABELS[level]}
+            </button>)}
+          </div>
+          <p className="er-fine">{DIFFICULTY_BLURBS[demoDifficulty]}</p>
+        </fieldset>
+        <p className="er-fine">
+          Difficulty changes how quickly they react and how much they remember, never how hard
+          they hit or how fast they move. They see only the room they stand in, exactly as you
+          do, and they walk into traps they have not watched you set.
+        </p>
+        <button type="button" className="er-primary" disabled={paused}
+          onClick={() => { setMenu(null); beginDemo(demoDifficulty, demoOpponents); }}>
+          Start the demo
+        </button>
+      </div>}
 
       {menu === "crate" && <div className="er-menu">
         <p>One crate costs {rf(definition.price)} and opens into exactly one gadget kit.</p>
@@ -1315,7 +1507,7 @@ function BriefingScreen(props: any) {
   const {
     economy, definition, rf, crateCount, canBuy, maxPrize, busy, paused, notice, identity,
     friendId, equippedKit, ownedKits, lobbies, netStatus, onBuy, onOpen, onSetMenu, onQuick,
-    onJoin, pendingPlay, friendName, leaderboard, onTutorial,
+    onJoin, pendingPlay, friendName, leaderboard, onTutorial, onDemo,
   } = props;
   const kit = kitById(equippedKit);
   return <div className="er-briefing">
@@ -1344,6 +1536,7 @@ function BriefingScreen(props: any) {
           Standings{leaderboard?.length ? ` · ${leaderboard.length}` : ""}
         </button>
         <button type="button" disabled={busy || paused} onClick={onTutorial}>Training run</button>
+        <button type="button" disabled={busy || paused} onClick={onDemo}>Demo match</button>
       </div>
       {!canBuy && <p className="er-fine">
         {economy.rfBalance < definition.price
@@ -1365,7 +1558,10 @@ function BriefingScreen(props: any) {
       {netStatus !== "online"
         ? <p className="er-empty">Waiting for the relay…</p>
         : lobbies.length === 0
-          ? <p className="er-empty">No open lobbies. Create one and share its code, or start a quick match.</p>
+          ? <p className="er-empty">
+              No open lobbies. Create one and share its code, start a quick match, or take a
+              demo match against computer agents.
+            </p>
           : <ul className="er-lobbylist">
             {lobbies.map((entry: LobbySummary) => <li key={entry.code}>
               <div>
@@ -1479,6 +1675,7 @@ function MatchScreen(props: any) {
     artworkFailed, onRetryArtwork, flashes, visitedRooms, exitRoom,
     lesson, lessonIndex, lessonCount, tutorialDone, lessonHidden,
     onHideLesson, onShowLesson, onSkipLesson, onLeaveTutorial,
+    demoLabel, onLeaveDemo,
   } = props;
   const self = match.self as MatchSnapshot["self"];
   const minutes = Math.floor(match.secondsLeft / 60);
@@ -1497,8 +1694,11 @@ function MatchScreen(props: any) {
     />}
     <div className="er-hud-top">
       {/* A rehearsal has no relay, so its connection dot would always read as trouble. */}
-      {netStatus !== "online" && !lesson && !tutorialDone
+      {netStatus !== "online" && !lesson && !tutorialDone && !demoLabel
         && <span className={`er-dot er-dot-${netStatus}`} title="Relay connection" />}
+      {/* A demo is off the record, and should never be mistaken for a match that counts. */}
+      {demoLabel && <button type="button" className="er-demo" onClick={onLeaveDemo}
+        title="Demo match against computer agents. Leave it.">DEMO · {demoLabel} ✕</button>}
       <span className="er-room">{match.roomName}</span>
       <span className={`er-timer${match.secondsLeft <= 30 ? " er-timer-low" : ""}`}>{minutes}:{seconds}</span>
       <Minimap roomIndex={match.roomIndex} exitRoom={exitRoom} visited={visitedRooms} />
@@ -1691,7 +1891,7 @@ function careerOf(
 
 function TitleScreen({
   sprites, reducedMotion, friendId, codename, friendName, career,
-  onStart, onTutorial, onStandings, netStatus,
+  onStart, onTutorial, onDemo, onStandings, netStatus,
 }: any) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -1718,6 +1918,7 @@ function TitleScreen({
     <div className="er-title-actions">
       <button type="button" className="er-primary" onClick={onStart}>Enter the embassy</button>
       <button type="button" onClick={onTutorial}>Training run</button>
+      <button type="button" onClick={onDemo}>Demo match</button>
       <button type="button" onClick={onStandings}>Standings</button>
     </div>
     <p className="er-title-foot">
@@ -1763,7 +1964,7 @@ function EscapeScreen({ escape, sprites, reducedMotion, friendId, onDone }: any)
   </div>;
 }
 
-function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
+function ResultsScreen({ results, identity, onBack, onAgain, inLobby, demo, demoLabel }: any) {
   const career = results.career as
     | { won: boolean; earned: number; points: number; place: number; of: number }
     | null;
@@ -1782,6 +1983,10 @@ function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
       </div>}
       <h2>{results.winnerName ? `${results.winnerName} wins` : "No winner"}</h2>
       <p>{results.reason}</p>
+      {demo && <p className="er-standing">
+        Demo match against {demoLabel?.toLowerCase() ?? "computer"} opposition. Nothing here
+        reached the relay, so no career points were earned and the standings are unchanged.
+      </p>}
       {career && <p className="er-standing">
         <strong>{ordinal(career.place)}</strong> on the career standings, out of {career.of}{" "}
         {career.of === 1 ? "agent" : "agents"} · <strong>{career.points}</strong>{" "}
@@ -1833,15 +2038,22 @@ function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
             </li>)}
           </ol>}
       <p className="er-fine">
-        Career points are one for playing and two more for winning, so the standings reward
-        turning up and coming first rather than a long match. Match points, shown under each
-        agent, are scored per item, takedown and escape instead. Standings persist across
-        matches and restarts. No RF changed hands: kits stay in your simulated FriendSDK
-        inventory whether you win or lose.
+        {demo
+          ? `The points column is what this match would have been worth on the relay: one for
+             playing and two more for winning. A demo pays none of it. Match points, shown
+             under each agent, are scored per item, takedown and escape.`
+          : `Career points are one for playing and two more for winning, so the standings
+             reward turning up and coming first rather than a long match. Match points, shown
+             under each agent, are scored per item, takedown and escape instead. Standings
+             persist across matches and restarts.`}
+        {" "}No RF changed hands: kits stay in your simulated FriendSDK inventory whether you
+        win or lose.
       </p>
       <div className="er-row">
-        {inLobby && <button type="button" className="er-primary" onClick={onAgain}>Exit round</button>}
-        <button type="button" onClick={onBack}>Leave lobby</button>
+        {demo
+          ? <button type="button" className="er-primary" onClick={onAgain}>Play again</button>
+          : inLobby && <button type="button" className="er-primary" onClick={onAgain}>Exit round</button>}
+        <button type="button" onClick={onBack}>{demo ? "Leave demo" : "Leave lobby"}</button>
       </div>
     </div>
   </div>;

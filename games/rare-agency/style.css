@@ -375,6 +375,20 @@
 .er-recap tr.er-me { background: #ccff0026; }
 .er-recap tr.er-me .er-recap-name { color: var(--ink); }
 
+/* ---- Demo mode ---------------------------------------------------------------------- */
+
+/* A badge that is also the way out, so a demo match can never be mistaken for a real one
+   and never has to be sat through. */
+.er-shell .er-demo {
+  flex: 0 0 auto; min-height: 0; padding: .2em .6em; border-width: 2px; border-radius: 999px;
+  font-size: .68em; font-weight: 700; letter-spacing: .08em; white-space: nowrap;
+  background: var(--ink); color: var(--signal); border-color: var(--signal);
+}
+.er-shell .er-demo:hover:not(:disabled) { background: #000; color: #fff; }
+.er-choice { margin: 0; padding: 8px 10px; border: 2px solid var(--ink); border-radius: 8px; background: #fff; }
+.er-choice legend { padding: 0 6px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.er-choice .er-fine { margin-top: 8px; }
+
 /* ---- Menus -------------------------------------------------------------------------- */
 
 .er-menu { display: flex; flex-direction: column; gap: 10px; }

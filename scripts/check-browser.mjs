@@ -195,6 +195,44 @@ try {
   await two.child.getByRole("heading", { name: "Agent dossier" }).waitFor({ timeout: 15000 });
   step("left the training run and returned to the briefing");
 
+  // --- Demo mode -------------------------------------------------------------------------
+  // A real match against computer agents, also entirely in the browser. It must draw the
+  // embassy, put rivals on the scoreboard, and be leavable without touching the relay.
+  await two.child.getByRole("button", { name: "Demo match", exact: true }).click();
+  await two.child.getByRole("heading", { name: "Demo match" }).waitFor({ timeout: 15000 });
+  await two.child.getByRole("button", { name: "3 agents", exact: true }).click();
+  await two.child.getByRole("button", { name: "Veteran", exact: true }).click();
+  await two.child.getByRole("button", { name: "Start the demo", exact: true }).click();
+  await two.child.locator(".er-demo").waitFor({ timeout: 15000 });
+  await two.page.waitForTimeout(500);
+  const demoPaint = await paintedColours(two);
+  assert.ok(demoPaint > 4, `demo mode is not drawing the embassy (${demoPaint} distinct sampled colours)`);
+  const demoScores = await two.child.locator(".er-scores > div").count();
+  assert.equal(demoScores, 4, `a demo against three agents should show four on the scoreboard, saw ${demoScores}`);
+  step(`demo mode renders a four-agent match (${demoPaint} distinct sampled colours)`);
+
+  // The clock must run, which proves the browser is stepping a real match rather than
+  // holding the first frame.
+  const clock = () => two.child.locator(".er-timer").innerText();
+  const openingTime = await clock();
+  await two.page.waitForTimeout(2500);
+  assert.notEqual(await clock(), openingTime, "the demo match clock is not running");
+
+  // And the computer agents must actually play. A veteran opens its own room's cache within
+  // a couple of seconds, so wait for somebody on the scoreboard to be holding something.
+  let holding = "";
+  for (let guard = 0; guard < 60 && !holding; guard++) {
+    const rows = await two.child.locator(".er-scores > div").allInnerTexts();
+    holding = rows.find(row => /[1-4]\/4/.test(row) && !/0\/4/.test(row)) ?? "";
+    if (!holding) await two.page.waitForTimeout(500);
+  }
+  assert.ok(holding, "nobody recovered any intelligence in thirty seconds of a veteran demo");
+  step(`computer agents are playing: ${holding.replace(/\s+/g, " ").trim()}`);
+
+  await two.child.locator(".er-demo").click();
+  await two.child.getByRole("heading", { name: "Agent dossier" }).waitFor({ timeout: 15000 });
+  step("left the demo and returned to the briefing");
+
 
   // --- Simulated economy: buy a crate and open it into a kit -----------------------------
   const confirm = page => page.getByRole("button", { name: /^Confirm preview/ }).click();

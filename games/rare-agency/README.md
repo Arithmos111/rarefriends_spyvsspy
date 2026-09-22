@@ -39,11 +39,11 @@ agent is drawn at portrait scale under a spotlight with their codename, Friend n
 career record — and names the exact control in the SDK frame that switches to another. See
 the known issues for the full shape of that gap.
 
-## Title screen and training run
+## Title screen, training run and demo mode
 
 The game opens on an attract screen: the embassy at night, your own Friend drawn at portrait
-scale from the canonical artwork, your career record, and three ways in — **Enter the embassy**,
-**Training run**, and **Standings**.
+scale from the canonical artwork, your career record, and four ways in — **Enter the embassy**,
+**Training run**, **Demo match**, and **Standings**.
 
 The training run is a nine-step walkthrough of every control. It steps the real simulation in
 the browser with no relay and no lobby, so it starts instantly and nothing another player does
@@ -56,6 +56,22 @@ for a moment, so one you happen to satisfy on the way in is still shown.
 underneath is clear to experiment in; **Show** brings it back. **Next step** moves on and
 **Leave training** returns to the briefing, where the run can be started again. Lessons never
 move your agent: the objective comes to wherever you are standing instead.
+
+**Demo match** is the other relay-free way in, for when nobody is in the lobby or you want to
+try something without spending a real match on it. It is a genuine match — the five-minute
+clock, four items, a winner, the departure sequence and the recap — against one to three
+computer agents, stepped in your browser like the training run. A `DEMO` badge in the header
+says so and doubles as the way out, and nothing that happens in one is sent to the relay, so a
+demo never touches the career standings.
+
+Three settings — **Rookie**, **Field agent**, **Veteran** — change how quickly the opposition
+reacts, how much of what it has searched it remembers, how readily it presses an attack, and
+whether it has learned that intelligence only ever hides in a room's marked cache. None of
+them changes how fast it moves, how hard it hits or how far it sees. A computer agent knows
+only the rooms it has stood in, cannot see a trap it did not set, and walks into yours; it
+plays through `applyInput` and `applyAction` exactly as your own client does, so a demo match
+is a live match with the relay taken out. See
+[`shared/cpu.ts`](shared/cpu.ts) and [`solo.ts`](solo.ts).
 
 ## Controls
 
@@ -279,11 +295,14 @@ there, the SDK's own `npm run check:games` reports it valid, and the SDK's `npm 
 109 passed, 2 skipped where Foundry is unavailable) and `npm run typecheck` stay clean.
 
 `npm test` covers the simulation: map determinism and walkability, item placement,
-doorways, searching, traps, combat, drops, escaping, the timer, the client and server
-agreeing step for step, and that every furniture type can be reached from every side. `npm run check:browser` drives two real browsers
-through the SDK's ownership gate, buys and opens a crate, creates and joins a lobby,
-plays a live match and asserts the SDK container bounds hold at desktop and phone
-widths.
+doorways, searching, traps, combat, drops, escaping, the timer, the match recap, the lobby's
+ready timeout, the client and server agreeing step for step, and that every furniture type can
+be reached from every side. It also plays whole matches against the computer agents, and
+asserts they route by the room graph, never walk through a wall or into the furniture, never
+stall, and know only the rooms they have stood in. `npm run check:browser` drives two real
+browsers through the SDK's ownership gate, buys and opens a crate, walks the training run,
+plays a four-agent demo match, creates and joins a lobby, plays a live match and asserts the
+SDK container bounds hold at desktop and phone widths.
 
 ## Known issues and capability gaps
 
