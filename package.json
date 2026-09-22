@@ -2,7 +2,7 @@
   "name": "rf-rare-agency",
   "version": "0.1.0",
   "private": true,
-  "description": "The Rare Agency — a four-player Spy vs Spy-style stealth game built on FriendSDK v0.1",
+  "description": "The Rare Agency \u2014 a four-player Spy vs Spy-style stealth game built on FriendSDK v0.1",
   "type": "module",
   "engines": {
     "node": ">=22.18.0"
@@ -18,7 +18,9 @@
     "test": "node --test tests/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run check:game && npm run check:browser && npm run check:proxy",
     "screenshots": "node scripts/screenshots.mjs",
-    "check:proxy": "node scripts/check-proxy.mjs"
+    "check:proxy": "node scripts/check-proxy.mjs",
+    "preview": "node scripts/preview-shot.mjs",
+    "submission": "node scripts/stamp-submission.mjs"
   },
   "dependencies": {
     "@rarefriends/friendsdk": "file:vendor/rarefriends-friendsdk.tgz",
