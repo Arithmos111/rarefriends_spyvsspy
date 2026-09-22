@@ -41,6 +41,8 @@ export type SimPlayer = {
   input: { dx: number; dy: number }; lastSeq: number;
   /** Doorway trap this agent has already been moved through, so it fires once per crossing. */
   itemsFound: number;
+  /** Running tallies kept only for the end-of-match recap; nothing in the rules reads them. */
+  stats: { hits: number; damageDealt: number; damageTaken: number; powerUpsTaken: number };
 };
 
 /** A trap on furniture or on a doorway; targetId distinguishes them. */
@@ -94,6 +96,7 @@ export function createMatch(
       detector: kitFlag(entry.kitId, "detector"), lockpick: kitFlag(entry.kitId, "lockpick"),
       disarm: kitFlag(entry.kitId, "disarm"), knife: false,
       busy: null, input: { dx: 0, dy: 0 }, lastSeq: 0, itemsFound: 0,
+      stats: { hits: 0, damageDealt: 0, damageTaken: 0, powerUpsTaken: 0 },
     });
   });
   return {
@@ -411,6 +414,7 @@ function completeBusy(sim: MatchSim, player: SimPlayer): void {
 /** Take an item into inventory, or apply it immediately if it is a consumable power-up. */
 function collect(sim: MatchSim, player: SimPlayer, item: Carryable): void {
   cue(sim, player.playerId, { kind: "pickup", item });
+  if (isPowerUp(item)) player.stats.powerUpsTaken++;
   if (!isPowerUp(item)) {
     player.inventory.push(item);
     player.itemsFound++;
@@ -454,7 +458,9 @@ function triggerTrap(sim: MatchSim, victim: SimPlayer, trap: SimTrap): void {
       : `${victim.codename} set off a ${label}.`, "alert");
     if (owner && !ownGoal) emit(sim, `Your ${label} caught ${victim.codename}.`, "good", owner.playerId);
     // A trap an agent set themselves is nobody's takedown.
-    if (owner && !ownGoal) owner.takedowns++;
+    const fatal = Math.max(0, victim.hp);
+    victim.stats.damageTaken += fatal;
+    if (owner && !ownGoal) { owner.takedowns++; owner.stats.damageDealt += fatal; }
     kill(sim, victim, ownGoal ? `their own ${label}` : `a ${label}`);
     return;
   }
@@ -480,6 +486,12 @@ function attack(sim: MatchSim, player: SimPlayer): void {
   }
   if (!best) return;
   const damage = attackDamage(player);
+  // Tallied at what the victim actually lost, so an overkill swing is not credited with
+  // damage nobody had left to take.
+  const applied = Math.min(damage, Math.max(0, best.hp));
+  player.stats.hits++;
+  player.stats.damageDealt += applied;
+  best.stats.damageTaken += applied;
   best.hp -= damage;
   best.busy = null;
   best.stunnedUntil = sim.now + HIT_STUN_MS;

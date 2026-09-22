@@ -10,12 +10,12 @@ import { randomUUID } from "node:crypto";
 import {
   INPUT_HZ, LOBBY_AUTOSTART_MS, LOBBY_IDLE_MS, LOBBY_MAX_PLAYERS, LOBBY_MIN_PLAYERS,
   MATCH_SECONDS, PROTOCOL_VERSION, TICK_MS,
-  careerPointsFor, normaliseFriendName,
+  careerPointsFor, normaliseFriendName, stragglerClock, stragglerExpired,
 } from "../games/rare-agency/shared/protocol.ts";
 import { EXIT_RADIUS, EXIT_X, EXIT_Y } from "../games/rare-agency/shared/mansion.ts";
 import { isKnownKit, kitById } from "../games/rare-agency/shared/loadouts.ts";
 import { applyAction, applyInput, createMatch, dropPlayer, scoreOf, stepMatch } from "../games/rare-agency/shared/sim.ts";
-import { buildSnapshot as snapshotFor, scoreboardOf } from "../games/rare-agency/shared/view.ts";
+import { buildSnapshot as snapshotFor, recapOf, scoreboardOf } from "../games/rare-agency/shared/view.ts";
 import { holdsGenesis, ownerOfFriend, rpcConfigSummary } from "./rpc.mjs";
 import { createLeaderboard } from "./leaderboard.mjs";
 
@@ -130,7 +130,44 @@ export function createRelay({ log = console.log } = {}) {
     lobbies.delete(lobby.code);
   }
 
+  /**
+   * Mark when a lobby started waiting on its stragglers.
+   *
+   * The clock only runs while everyone else is ready, so a member is never dropped for
+   * taking their time in a lobby that was not held up by them.
+   */
+  function trackStragglers(lobby) {
+    const members = [...lobby.members.values()];
+    const clocks = stragglerClock(members, now());
+    members.forEach((member, index) => { member.holdingUpSince = clocks[index]; });
+  }
+
+  /** Remove anyone who has held a ready lobby up for too long. Returns true if any left. */
+  function dropStragglers(lobby) {
+    const at = now();
+    let dropped = false;
+    for (const [playerId, member] of [...lobby.members.entries()]) {
+      if (!stragglerExpired(member.holdingUpSince ?? null, at)) continue;
+      lobby.members.delete(playerId);
+      dropped = true;
+      const player = players.get(playerId);
+      if (player) {
+        player.lobby = null;
+        send(player, { t: "lobby.left" });
+        fail(player, "Removed from the lobby: everyone else was ready.");
+      }
+      log(`dropped an unready agent from lobby ${lobby.code}`);
+    }
+    if (dropped) {
+      if (lobby.members.size === 0) closeLobby(lobby);
+      else maybeAutoStart(lobby);
+      broadcastLobbyList();
+    }
+    return dropped;
+  }
+
   function maybeAutoStart(lobby) {
+    trackStragglers(lobby);
     const ready = [...lobby.members.values()].filter(member => member.ready).length;
     const enough = lobby.members.size >= LOBBY_MIN_PLAYERS && ready === lobby.members.size;
     if (enough && lobby.state === "waiting") {
@@ -228,6 +265,7 @@ export function createRelay({ log = console.log } = {}) {
     const message = {
       t: "match.end", winner: match.winner, winnerName: winner?.codename ?? null,
       reason: match.endReason, escaped: match.escaped, results,
+      recap: recapOf(match),
     };
     for (const playerId of lobby.members.keys()) {
       const player = players.get(playerId);
@@ -422,6 +460,12 @@ export function createRelay({ log = console.log } = {}) {
     }
     const at = now();
     for (const lobby of [...lobbies.values()]) {
+      if (lobby.state === "waiting") {
+        // Run the clock here as well as on every ready change, so joining or leaving a lobby
+        // starts it too rather than waiting for somebody to touch their ready button.
+        trackStragglers(lobby);
+        if (dropStragglers(lobby)) continue;
+      }
       if (lobby.state === "starting" && lobby.startsAt && at >= lobby.startsAt) startMatch(lobby);
       if (lobby.members.size === 0 && at - lobby.lastActivity > LOBBY_IDLE_MS) closeLobby(lobby);
     }

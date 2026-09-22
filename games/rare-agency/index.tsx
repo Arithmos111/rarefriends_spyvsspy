@@ -37,7 +37,7 @@ import {
   normaliseFriendName,
   type Carryable, type Direction, type LeaderboardRow, type LobbyMember, type LobbySummary,
   type MatchCue, type MatchEvent, type MatchSnapshot, type PowerUp, type PublicPlayer,
-  type ServerMessage, type TrapType,
+  type RecapRow, type ServerMessage, type TrapType,
 } from "./shared/protocol.ts";
 import {
   EXIT_RADIUS, EXIT_X, EXIT_Y, blockedByFurniture, createMap, insideRoom,
@@ -84,6 +84,8 @@ function approachPoint(room: Room, target: { x: number; y: number }, from: { x: 
 type LobbyView = {
   code: string; name: string; isPrivate: boolean;
   members: readonly LobbyMember[]; state: "waiting" | "starting" | "playing"; startsInMs: number | null;
+  /** When the countdown ends, by this machine's clock. Null when no countdown is running. */
+  startsAtLocal: number | null;
 };
 
 export default function EmbassyRun({ friendId, client, paused }: GameComponentProps) {
@@ -105,6 +107,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
   const [match, setMatch] = useState<MatchSnapshot | null>(null);
   const [results, setResults] = useState<{
     winnerName: string | null; reason: string; results: readonly PublicPlayer[];
+    /** Per-agent tallies for the recap table, sent once the match is over. */
+    recap: readonly RecapRow[];
     /** This agent's own career standing after the match, or null before the relay sends it. */
     career: { won: boolean; earned: number; points: number; place: number; of: number } | null;
   } | null>(null);
@@ -368,6 +372,8 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         setLobby({
           code: message.code, name: message.name, isPrivate: message.isPrivate,
           members: message.members, state: message.state, startsInMs: message.startsInMs,
+          // Anchor the countdown to this machine's clock, so it can tick between messages.
+          startsAtLocal: message.startsInMs === null ? null : Date.now() + message.startsInMs,
         });
         setResults(null);
         setMenu(current => (current === "join" || current === "create" ? null : current));
@@ -416,7 +422,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
         const mine = message.winner && message.winner === identityRef.current?.playerId;
         setResults({
           winnerName: message.winnerName, reason: message.reason, results: message.results,
-          career: message.career ?? null,
+          recap: message.recap ?? [], career: message.career ?? null,
         });
         setMatch(null);
         setEnteringMatch(false);
@@ -1378,7 +1384,18 @@ function BriefingScreen(props: any) {
 }
 
 function LobbyScreen({ lobby, identity, isHost, me, equippedKit, onKit, onReady, onStart, onLeave }: any) {
-  const countdown = lobby.startsInMs !== null ? Math.ceil(lobby.startsInMs / 1000) : null;
+  // The relay sends the remaining time once, when the lobby state changes, so reading it
+  // straight gave a number that never moved. Anchor it to a local deadline and tick.
+  const deadline = lobby.startsInMs === null ? null : lobby.startsAtLocal;
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (deadline === null || deadline === undefined) return;
+    const timer = setInterval(() => setTick(value => value + 1), 200);
+    return () => clearInterval(timer);
+  }, [deadline]);
+  const countdown = deadline === null || deadline === undefined
+    ? null
+    : Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
   return <div className="er-lobbyroom">
     <div className="er-panel">
       <div className="er-panel-head">
@@ -1750,6 +1767,8 @@ function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
   const career = results.career as
     | { won: boolean; earned: number; points: number; place: number; of: number }
     | null;
+  // Older relays send no recap; fall back to the one-line-per-agent list rather than nothing.
+  const recap = (results.recap ?? []) as readonly RecapRow[];
   const ordinal = (value: number) => {
     const tens = value % 100;
     if (tens >= 11 && tens <= 13) return `${value}th`;
@@ -1768,21 +1787,60 @@ function ResultsScreen({ results, identity, onBack, onAgain, inLobby }: any) {
         {career.of === 1 ? "agent" : "agents"} · <strong>{career.points}</strong>{" "}
         {career.points === 1 ? "point" : "points"} all told
       </p>}
-      <ol className="er-result-list">
-        {results.results.map((player: PublicPlayer, index: number) => <li key={player.playerId}
-          className={player.playerId === identity?.playerId ? "er-me" : ""}>
-          <span>{index + 1}. {displayName(player.codename, player.friendName)}{player.genesis ? " ◆" : ""}</span>
-          <span>{player.score} pts · {player.items}/4 · {player.takedowns} takedowns · {player.deaths} losses</span>
-        </li>)}
-      </ol>
+      {recap.length > 0
+        ? <div className="er-recap">
+            <table className="er-table">
+              <caption className="er-fine">How the mission went, agent by agent.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Agent</th>
+                  <th scope="col" className="er-num"><abbr title="Intelligence recovered">Intel</abbr></th>
+                  <th scope="col" className="er-num"><abbr title="Blows landed">Hits</abbr></th>
+                  <th scope="col" className="er-num"><abbr title="Damage dealt">Dealt</abbr></th>
+                  <th scope="col" className="er-num"><abbr title="Damage taken">Taken</abbr></th>
+                  <th scope="col" className="er-num"><abbr title="Rivals taken down">Downs</abbr></th>
+                  <th scope="col" className="er-num"><abbr title="Times taken out">Lost</abbr></th>
+                  <th scope="col" className="er-num"><abbr title="Power-ups collected">Kit</abbr></th>
+                  <th scope="col" className="er-num"><abbr title="Career points earned">Pts</abbr></th>
+                </tr>
+              </thead>
+              <tbody>
+                {recap.map((row: RecapRow) => <tr key={row.playerId}
+                  className={row.playerId === identity?.playerId ? "er-me" : ""}>
+                  <td>{row.place}</td>
+                  <th scope="row" className="er-recap-name">
+                    {displayName(row.codename, row.friendName)}{row.genesis ? " ◆" : ""}
+                    <small>{row.score} match {row.score === 1 ? "point" : "points"}{row.won ? " · winner" : ""}</small>
+                  </th>
+                  <td className="er-num">{row.items}/4</td>
+                  <td className="er-num">{row.hits}</td>
+                  <td className="er-num">{row.damageDealt}</td>
+                  <td className="er-num">{row.damageTaken}</td>
+                  <td className="er-num">{row.takedowns}</td>
+                  <td className="er-num">{row.deaths}</td>
+                  <td className="er-num">{row.powerUps}</td>
+                  <td className="er-num">+{row.points}</td>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+        : <ol className="er-result-list">
+            {results.results.map((player: PublicPlayer, index: number) => <li key={player.playerId}
+              className={player.playerId === identity?.playerId ? "er-me" : ""}>
+              <span>{index + 1}. {displayName(player.codename, player.friendName)}{player.genesis ? " ◆" : ""}</span>
+              <span>{player.score} pts · {player.items}/4 · {player.takedowns} takedowns · {player.deaths} losses</span>
+            </li>)}
+          </ol>}
       <p className="er-fine">
         Career points are one for playing and two more for winning, so the standings reward
-        turning up and coming first rather than a long match. The points beside each agent
-        above are that match's score. Standings persist across matches and restarts. No RF
-        changed hands: kits stay in your simulated FriendSDK inventory whether you win or lose.
+        turning up and coming first rather than a long match. Match points, shown under each
+        agent, are scored per item, takedown and escape instead. Standings persist across
+        matches and restarts. No RF changed hands: kits stay in your simulated FriendSDK
+        inventory whether you win or lose.
       </p>
       <div className="er-row">
-        {inLobby && <button type="button" className="er-primary" onClick={onAgain}>Back to the lobby</button>}
+        {inLobby && <button type="button" className="er-primary" onClick={onAgain}>Exit round</button>}
         <button type="button" onClick={onBack}>Leave lobby</button>
       </div>
     </div>

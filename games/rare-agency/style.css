@@ -362,6 +362,19 @@
 }
 .er-result-list li.er-me { border-color: var(--signal); box-shadow: inset 0 0 0 2px var(--signal); }
 
+/* The recap carries ten narrow columns. On a phone it scrolls sideways rather than wrapping
+   into an unreadable stack, and the agent column stays put so a row is still identifiable. */
+.er-recap { overflow-x: auto; overscroll-behavior-x: contain; margin: 0 -4px; }
+.er-recap .er-table { min-width: 460px; }
+.er-recap caption { caption-side: top; text-align: left; padding: 0 0 6px; }
+.er-recap th, .er-recap td { padding: 5px 4px; white-space: nowrap; }
+.er-recap abbr { text-decoration: none; border-bottom: 1px dotted var(--muted); cursor: help; }
+.er-recap .er-num { text-align: right; font-variant-numeric: tabular-nums; }
+.er-recap-name { font-size: 12px; font-weight: 700; text-transform: none; letter-spacing: 0; color: var(--ink); }
+.er-recap-name small { display: block; font-size: 10px; font-weight: 400; color: var(--muted); }
+.er-recap tr.er-me { background: #ccff0026; }
+.er-recap tr.er-me .er-recap-name { color: var(--ink); }
+
 /* ---- Menus -------------------------------------------------------------------------- */
 
 .er-menu { display: flex; flex-direction: column; gap: 10px; }

@@ -1,0 +1,16 @@
+/*
+ * Styles for the SDK's own page around the game frame.
+ *
+ * FriendSDK's game runner imports `host.css` from the game directory into the parent
+ * document, which is the only supported way to touch the chrome outside the sandbox. The
+ * game's own styles live in style.css and apply inside the frame.
+ */
+
+/*
+ * The toolbar's "Local preview" chip duplicates the SIMULATED RF badge the game already
+ * carries in its own header, where a player is actually looking, and it crowds the Friend
+ * and wallet buttons at phone widths. The simulated-economy disclosure is not lost: the
+ * badge stays, the wallet menu still says balances are simulated, and this rule is scoped
+ * to preview mode, so a live deployment keeps its "Live · Robinhood" label.
+ */
+.rf-game-frame[data-mode="preview"] .rf-frame-mode { display: none; }

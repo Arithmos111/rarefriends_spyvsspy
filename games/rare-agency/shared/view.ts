@@ -7,8 +7,8 @@
  * and other traps only with a detector) are enforced in exactly one place.
  */
 import {
-  canonicalDoorTrapId, isDoorTrapId,
-  type MatchSnapshot, type PublicPlayer, type RoomTrap,
+  canonicalDoorTrapId, careerPointsFor, isDoorTrapId,
+  type MatchSnapshot, type PublicPlayer, type RecapRow, type RoomTrap,
 } from "./protocol.ts";
 import { scoreOf, type MatchSim, type SimPlayer } from "./sim.ts";
 
@@ -21,6 +21,32 @@ export function scoreboardOf(sim: MatchSim): PublicPlayer[] {
       connected: player.connected, hasKnife: player.knife, score: scoreOf(sim, player),
     }))
     .sort((a, b) => b.score - a.score || b.items - a.items || a.deaths - b.deaths);
+}
+
+/**
+ * The end-of-match recap, in finishing order.
+ *
+ * Ordered by the same rule as the live scoreboard so the podium does not reshuffle between
+ * the last snapshot and the recap. Built here rather than on the relay so the training run
+ * can show the same table.
+ */
+export function recapOf(sim: MatchSim): RecapRow[] {
+  const order = scoreboardOf(sim);
+  return order.map((entry, index) => {
+    const player = sim.players.get(entry.playerId)!;
+    const won = sim.winner === player.playerId;
+    return {
+      playerId: player.playerId, codename: player.codename, friendId: player.friendId,
+      genesis: player.genesis, friendName: player.friendName,
+      place: index + 1, won, score: entry.score,
+      items: player.itemsFound, takedowns: player.takedowns, deaths: player.deaths,
+      hits: player.stats.hits,
+      damageDealt: player.stats.damageDealt,
+      damageTaken: player.stats.damageTaken,
+      powerUps: player.stats.powerUpsTaken,
+      points: careerPointsFor(won),
+    };
+  });
 }
 
 function actorOf(sim: MatchSim, player: SimPlayer) {

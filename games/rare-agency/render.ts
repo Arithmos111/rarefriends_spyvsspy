@@ -2033,7 +2033,19 @@ export function drawAgentPortrait(
 
 // --- Escape sequence ---------------------------------------------------------------------
 
-export const ESCAPE_DURATION_MS = 6200;
+export const ESCAPE_DURATION_MS = 16_200;
+
+/**
+ * Beats of the departure, as fractions of the run.
+ *
+ * The sequence used to be six seconds, which was not long enough to read the verdict and
+ * still watch the aircraft leave. The extra ten seconds go into the approach and the hold
+ * after the climb rather than into slowing the taxi down, so nothing reads as sluggish.
+ */
+const HOLD_IN = 0.07;    // empty apron while the verdict lands
+const TAXI_END = 0.33;   // the aircraft has rolled to its mark
+const BOARD_END = 0.58;  // the agent is aboard and the door is shut
+const CLIMB_END = 0.86;  // wheels up and away up the frame
 
 /**
  * Plays when an agent carries the full set through the courtyard gate: a dash across the
@@ -2110,20 +2122,24 @@ export function drawEscapeScene(
   // The aircraft taxis in, holds while the agent boards, then climbs away up the frame
   // rather than straight off the side. Leaving sideways at speed emptied the apron for the
   // last second and a half, so the payoff ended on nothing.
-  const TAXI_END = 0.46;
-  const ROLL_START = 0.62;
-  const roll = Math.max(0, (t - ROLL_START) / (1 - ROLL_START));
+  const taxi = Math.max(0, Math.min(1, (t - HOLD_IN) / (TAXI_END - HOLD_IN)));
+  const rolling = Math.max(0, (t - BOARD_END) / (CLIMB_END - BOARD_END));
+  const roll = Math.min(1, rolling);
+  // Past the climb the aircraft keeps easing away instead of freezing, so the long hold at
+  // the end reads as a departure rather than as a paused frame.
+  const drift = Math.max(0, rolling - 1);
   const planeX = t < TAXI_END
-    ? -300 + (t / TAXI_END) * 780
-    : 480 + roll * roll * 430;
-  const planeY = horizon - 40 - roll * roll * 300;
+    ? -300 + taxi * 780
+    : 480 + roll * roll * 430 + drift * 40;
+  const planeY = horizon - 40 - roll * roll * 300 - drift * 26;
   // Receding as it climbs, so it reads as distance rather than as a sprite sliding away.
-  const planeScale = 1 - roll * 0.55;
+  const planeScale = Math.max(0.3, 1 - roll * 0.55 - drift * 0.12);
   drawPlane(context, planeX, planeY, options.reducedMotion ? 0 : options.timeMs, planeScale);
 
   // The agent sprints on and boards just as the roll begins.
-  if (t < ROLL_START) {
-    const runX = 90 + Math.min(1, t / (ROLL_START - 0.02)) * 380;
+  if (t < BOARD_END) {
+    const dash = Math.max(0, Math.min(1, (t - HOLD_IN) / (BOARD_END - HOLD_IN - 0.02)));
+    const runX = 90 + dash * 380;
     const bob = options.reducedMotion ? 0 : Math.abs(Math.sin(options.timeMs / 90)) * 5;
     drawEscapeAgent(context, runX, horizon + 96 - bob, options.sprites, options.timeMs, options.reducedMotion);
   }

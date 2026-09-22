@@ -970,3 +970,102 @@ test("a missed swing tells nobody anything", () => {
   assert.equal(match.cues.length, 0, "swinging at nobody is not feedback");
   assert.equal(match.effects.length, 0);
 });
+
+test("the recap tallies hits, damage both ways, kit pickups and career points", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const attacker = match.players.get("a");
+  const target = match.players.get("b");
+  target.room = attacker.room;
+  target.x = attacker.x + 10; target.y = attacker.y;
+  target.invulnerableUntil = 0;
+
+  sim.applyAction(match, "a", { kind: "attack" });
+  attacker.attackReadyAt = 0;
+  sim.applyAction(match, "a", { kind: "attack" });
+
+  assert.equal(attacker.stats.hits, 2, "two swings landed");
+  assert.equal(attacker.stats.damageDealt, P.FIST_DAMAGE * 2);
+  assert.equal(target.stats.damageTaken, P.FIST_DAMAGE * 2);
+  assert.equal(target.stats.hits, 0, "the target never swung back");
+
+  const recap = view.recapOf(match);
+  assert.equal(recap.length, 2);
+  const mine = recap.find(row => row.playerId === "a");
+  assert.equal(mine.hits, 2);
+  assert.equal(mine.damageDealt, P.FIST_DAMAGE * 2);
+  assert.equal(recap.find(row => row.playerId === "b").damageTaken, P.FIST_DAMAGE * 2);
+  // Nobody won, so everyone is paid only for turning up.
+  for (const row of recap) assert.equal(row.points, P.CAREER_POINTS_PLAYED);
+  assert.deepEqual(recap.map(row => row.place), [1, 2], "places run in finishing order");
+});
+
+test("an overkill blow is credited only with the health it actually took", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const attacker = match.players.get("a");
+  const target = match.players.get("b");
+  attacker.knife = true;
+  target.room = attacker.room;
+  target.x = attacker.x + 10; target.y = attacker.y;
+  target.invulnerableUntil = 0;
+  target.hp = 1;
+
+  sim.applyAction(match, "a", { kind: "attack" });
+  assert.equal(target.hp, 0, "one health against a stiletto is a takedown");
+  assert.equal(attacker.stats.damageDealt, 1, "the missing health was never there to take");
+  assert.equal(target.stats.damageTaken, 1);
+  assert.equal(attacker.takedowns, 1);
+});
+
+test("a lethal trap credits its owner with the damage the victim still had", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const owner = match.players.get("a");
+  const victim = match.players.get("b");
+  const piece = match.map.rooms[0].furniture[0];
+
+  owner.room = 0; owner.x = piece.x; owner.y = piece.y + 30;
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+
+  victim.room = 0; victim.x = piece.x; victim.y = piece.y + 30;
+  const before = victim.hp;
+  sim.applyAction(match, "b", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+
+  assert.equal(victim.hp, 0, "a bomb is lethal");
+  assert.equal(victim.stats.damageTaken, before, "the whole remaining bar went");
+  assert.equal(owner.stats.damageDealt, before, "credited to whoever set it");
+  assert.equal(owner.stats.hits, 0, "a trap is not a blow landed");
+});
+
+test("a trap you set yourself is credited to nobody", () => {
+  const match = start(roster({ id: "a", kit: "demolition" }, { id: "b" }));
+  const agent = match.players.get("a");
+  const piece = match.map.rooms[0].furniture[0];
+  agent.room = 0; agent.x = piece.x; agent.y = piece.y + 30;
+  sim.applyAction(match, "a", { kind: "plant", targetId: piece.id, trap: "bomb" });
+  run(match, P.PLANT_MS + 100);
+  const before = agent.hp;
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+
+  assert.equal(agent.hp, 0);
+  assert.equal(agent.stats.damageTaken, before);
+  assert.equal(agent.stats.damageDealt, 0, "catching yourself is nobody's damage");
+});
+
+test("collecting a power-up counts once, and mission items do not", () => {
+  const match = start(roster({ id: "a" }, { id: "b" }));
+  const player = match.players.get("a");
+  const piece = match.map.rooms[0].furniture[0];
+
+  piece.contents = "medkit";
+  piece.emptied = false;
+  player.hp = 1;
+  player.room = 0; player.x = piece.x; player.y = piece.y + 30;
+  sim.applyAction(match, "a", { kind: "search", furnitureId: piece.id });
+  run(match, P.SEARCH_MS + 200);
+
+  assert.equal(player.stats.powerUpsTaken, 1, "the medkit counted");
+  assert.equal(player.itemsFound, 0, "a medkit is not intelligence");
+  assert.equal(view.recapOf(match).find(row => row.playerId === "a").powerUps, 1);
+});

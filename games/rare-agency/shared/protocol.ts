@@ -6,7 +6,7 @@
  * lets the client predict movement with the same numbers the server uses to correct it.
  */
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 /** Server simulation rate. Snapshots are sent at this rate. */
 export const TICK_HZ = 20;
@@ -63,6 +63,40 @@ export const MATCH_SECONDS = 300;
 export const LOBBY_MAX_PLAYERS = 4;
 export const LOBBY_MIN_PLAYERS = 2;
 export const LOBBY_AUTOSTART_MS = 5000;
+/**
+ * How long one member may hold up a lobby where everyone else is ready before being removed.
+ *
+ * Counted only while every other member is ready, so nobody is dropped for taking their time
+ * in a lobby that was not waiting on them.
+ */
+export const LOBBY_READY_TIMEOUT_MS = 30_000;
+
+/**
+ * Decide who, if anyone, is holding a lobby up.
+ *
+ * A lobby counts as held up only when it has enough members to start and at least one is
+ * ready while at least one is not: nobody should be dropped from a lobby that was never
+ * waiting on them, and a lobby where nobody is ready is not waiting on anyone in particular.
+ *
+ * Returns the timestamp each member's clock should hold, so callers can persist it and ask
+ * again later. Pure, so the rule can be tested without standing up a relay.
+ */
+export function stragglerClock<T extends { ready: boolean; holdingUpSince: number | null }>(
+  members: readonly T[], at: number,
+): (number | null)[] {
+  const unready = members.filter(member => !member.ready);
+  const heldUp = members.length >= LOBBY_MIN_PLAYERS
+    && unready.length > 0 && unready.length < members.length;
+  return members.map(member => {
+    if (!heldUp || member.ready) return null;
+    return member.holdingUpSince ?? at;
+  });
+}
+
+/** True once a member has held a ready lobby up for longer than the grace period. */
+export function stragglerExpired(holdingUpSince: number | null, at: number): boolean {
+  return holdingUpSince !== null && at - holdingUpSince >= LOBBY_READY_TIMEOUT_MS;
+}
 /** A lobby with nobody in it is reclaimed after this long. */
 export const LOBBY_IDLE_MS = 60_000;
 
@@ -293,6 +327,22 @@ export type PublicPlayer = Readonly<{
   hasKnife: boolean; score: number;
 }>;
 
+/**
+ * One agent's line in the end-of-match recap.
+ *
+ * Sent once, with `match.end`, rather than folded into the per-tick scoreboard: damage
+ * tallies would tell you how a rival's match is going from across the embassy, and fog of
+ * war is the game. `points` is the career award for this match, not the match score.
+ */
+export type RecapRow = Readonly<{
+  playerId: string; codename: string; friendId: string; genesis: boolean;
+  friendName: string | null;
+  place: number; won: boolean; score: number;
+  items: number; takedowns: number; deaths: number;
+  hits: number; damageDealt: number; damageTaken: number; powerUps: number;
+  points: number;
+}>;
+
 /** Career totals, kept per Friend across every match the relay has hosted. */
 export type LeaderboardRow = Readonly<{
   friendId: string; friendName: string | null; codename: string;
@@ -423,6 +473,8 @@ export type ServerMessage =
       /** Set when the winner reached the gate, which plays the escape sequence. */
       escaped: boolean;
       results: readonly PublicPlayer[];
+      /** Per-agent tallies for the recap shown after the escape sequence. */
+      recap: readonly RecapRow[];
       /** This viewer's own career standing, after the match was folded in. */
       career: Readonly<{ won: boolean; earned: number; points: number; place: number; of: number }> | null }
   | { t: "leaderboard"; rows: readonly LeaderboardRow[] }
