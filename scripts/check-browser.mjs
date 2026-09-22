@@ -200,8 +200,20 @@ try {
   // embassy, put rivals on the scoreboard, and be leavable without touching the relay.
   await two.child.getByRole("button", { name: "Demo match", exact: true }).click();
   await two.child.getByRole("heading", { name: "Demo match" }).waitFor({ timeout: 15000 });
-  await two.child.getByRole("button", { name: "3 agents", exact: true }).click();
-  await two.child.getByRole("button", { name: "Veteran", exact: true }).click();
+  // The picked option must actually look picked. These sit inside an SDK menu, whose own
+  // button rule outbids a bare class, so assert the computed style rather than the markup.
+  const opponents = count => two.child.getByRole("button", { name: `${count} agent${count === 1 ? "" : "s"}`, exact: true });
+  const fill = locator => locator.evaluate(node => getComputedStyle(node).backgroundColor);
+  await opponents(3).click();
+  assert.equal(await opponents(3).getAttribute("aria-pressed"), "true");
+  assert.notEqual(await fill(opponents(3)), await fill(opponents(1)),
+    "the selected opposition count is drawn the same as the unselected ones");
+  const veteran = two.child.getByRole("button", { name: "Veteran", exact: true });
+  const rookie = two.child.getByRole("button", { name: "Rookie", exact: true });
+  await veteran.click();
+  assert.notEqual(await fill(veteran), await fill(rookie),
+    "the selected difficulty is drawn the same as the unselected ones");
+  step("the demo settings show which option is selected");
   await two.child.getByRole("button", { name: "Start the demo", exact: true }).click();
   await two.child.locator(".er-demo").waitFor({ timeout: 15000 });
   await two.page.waitForTimeout(500);

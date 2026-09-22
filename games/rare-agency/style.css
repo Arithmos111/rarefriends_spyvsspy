@@ -93,7 +93,9 @@
 .er-shell button:active:not(:disabled) { transform: translateY(1px); }
 .er-shell button:disabled { opacity: 0.4; cursor: not-allowed; }
 .er-shell button:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
-.er-primary { background: var(--signal); font-weight: 700; }
+/* Scoped to the shell so it also wins inside an SDK menu, whose own `.rf-frame-scrim button`
+   rule is a class-plus-element selector and outbids a bare class. */
+.er-shell .er-primary { background: var(--signal); font-weight: 700; }
 .er-icon { min-width: 38px; padding: 6px 10px; }
 
 .er-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -388,6 +390,24 @@
 .er-choice { margin: 0; padding: 8px 10px; border: 2px solid var(--ink); border-radius: 8px; background: #fff; }
 .er-choice legend { padding: 0 6px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .er-choice .er-fine { margin-top: 8px; }
+
+/* A picked option is marked three ways — a filled dot, a fill, and an inset ring — because
+   colour alone is not a state anyone can rely on, and these sit inside an SDK menu whose own
+   button rule outbids a bare class and would otherwise flatten them all to the same grey.
+   The dot is drawn rather than written: generated text counts towards a control's accessible
+   name in Chromium, and the state already travels properly as aria-pressed. */
+.er-shell .er-toggle { position: relative; padding-left: 2em; }
+.er-shell .er-toggle::before {
+  content: ""; position: absolute; left: .7em; top: 50%; transform: translateY(-50%);
+  width: .72em; height: .72em; border-radius: 50%;
+  border: 2px solid var(--muted); background: transparent;
+}
+.er-shell .er-toggle[aria-pressed="true"] {
+  background: var(--signal); font-weight: 700;
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.er-shell .er-toggle[aria-pressed="true"]::before { border-color: var(--ink); background: var(--ink); }
+.er-shell .er-toggle[aria-pressed="true"]:hover:not(:disabled) { background: var(--signal); }
 
 /* ---- Menus -------------------------------------------------------------------------- */
 

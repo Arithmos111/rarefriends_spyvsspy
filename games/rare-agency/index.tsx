@@ -1218,8 +1218,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           <legend>Opposition</legend>
           <div className="er-row">
             {[1, 2, 3].map(count => <button type="button" key={count}
-              aria-pressed={demoOpponents === count}
-              className={demoOpponents === count ? "er-primary" : ""}
+              className="er-toggle" aria-pressed={demoOpponents === count}
               onClick={() => setDemoOpponents(count)}>
               {count} {count === 1 ? "agent" : "agents"}
             </button>)}
@@ -1229,8 +1228,7 @@ export default function EmbassyRun({ friendId, client, paused }: GameComponentPr
           <legend>How good they are</legend>
           <div className="er-row">
             {DIFFICULTIES.map(level => <button type="button" key={level}
-              aria-pressed={demoDifficulty === level}
-              className={demoDifficulty === level ? "er-primary" : ""}
+              className="er-toggle" aria-pressed={demoDifficulty === level}
               onClick={() => setDemoDifficulty(level)}>
               {DIFFICULTY_LABELS[level]}
             </button>)}
