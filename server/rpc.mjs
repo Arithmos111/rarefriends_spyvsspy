@@ -8,8 +8,16 @@
 const RPC_URL = process.env.RF_RPC_URL ?? "https://rpc.mainnet.chain.robinhood.com";
 export const CHAIN_ID = 4663;
 export const GENERATIONS_ADDRESS = process.env.RF_GENERATIONS_ADDRESS ?? "0x14C49e6118F46525dE9ab41a51cBAA3c6EBF181D";
-/** Rare Friends Genesis is not published in FriendSDK v0.1; supply it to enable the perk. */
-export const GENESIS_ADDRESS = process.env.RF_GENESIS_ADDRESS ?? null;
+/**
+ * Rare Friends Genesis. FriendSDK does not publish this address, so it is carried here.
+ *
+ * A wrong address fails safe: balanceOf against a contract that does not answer it throws,
+ * which holdsGenesis treats as "no perk". Set RF_GENESIS_ADDRESS to override, or to the
+ * empty string to switch the perk off entirely.
+ */
+export const GENESIS_ADDRESS = process.env.RF_GENESIS_ADDRESS === ""
+  ? null
+  : process.env.RF_GENESIS_ADDRESS ?? "0x116eaa62241751e0c98da43d458600c6c17cd361";
 
 const SELECTOR_OWNER_OF = "0x6352211e";
 const SELECTOR_BALANCE_OF = "0x70a08231";

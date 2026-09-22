@@ -111,7 +111,7 @@ player pulls about 32 KiB/s, so 100 concurrent players for an hour is roughly 11
 ever matters, the lever is the snapshot, which is about 1.6 KB and currently resends static
 furniture and the full scoreboard every tick.
 
-Set `RF_GENESIS_ADDRESS` to switch on the Genesis perk once that contract address is available.
+The Genesis perk is on by default; set `RF_GENESIS_ADDRESS` to override the contract address, or to an empty string to switch it off.
 
 ## How it fits together
 
@@ -153,9 +153,9 @@ connects a wallet, enumerates token IDs, or implements its own gate.
 
 **Genesis** holders get a perk rather than a separate door: the relay reads the owner
 of the selected Friend and checks their Genesis balance, granting an extra letter bomb
-and a GENESIS badge. FriendSDK publishes no Genesis contract address, so set
-`RF_GENESIS_ADDRESS` to switch the perk on; without it every agent is treated as a
-non-holder.
+and a GENESIS badge. FriendSDK publishes no Genesis contract address, so the collection's
+address is carried in `server/rpc.mjs`; `RF_GENESIS_ADDRESS` overrides it, and setting that
+variable to an empty string switches the perk off.
 
 ## Checks
 

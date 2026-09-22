@@ -227,7 +227,7 @@ Less setup, TLS handled for you, and `fly.toml` is already in the repository.
 ```sh
 fly launch --no-deploy --copy-config   # choose your own app name
 fly deploy
-fly secrets set RF_GENESIS_ADDRESS=0x...   # optional
+fly secrets set RF_GENESIS_ADDRESS=0x...   # optional; overrides the built-in Genesis address
 ```
 
 `fly.toml` deliberately pins one always-on machine with `auto_stop_machines = false`. Do not

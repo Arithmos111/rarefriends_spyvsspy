@@ -293,9 +293,12 @@ widths.
   token. Closing this needs a signed session attestation from the trusted runtime,
   which SDK v0.1 does not expose. Nothing of value depends on it today: the economy is
   simulated and lives in the SDK's per-Friend preview ledger, not on the relay.
-- **The Genesis perk is inactive by default.** FriendSDK v0.1 does not publish a Rare
-  Friends Genesis contract address. Set `RF_GENESIS_ADDRESS` to enable the perk; until
-  then every agent is treated as a non-holder and no badge is shown.
+- **The Genesis perk depends on an address FriendSDK does not publish.** The Rare Friends
+  Genesis contract address is carried in `server/rpc.mjs` rather than supplied by the SDK,
+  and `RF_GENESIS_ADDRESS` overrides it. A wrong address fails safe — the balance read
+  throws and every agent is treated as a non-holder — but it fails silently, so a holder
+  would simply not see the badge.
+
 - **Preview state is session-local.** The SDK's simulated ledger resets on reload, so
   kits bought in one session are gone in the next. Persisting them needs the on-chain
   phase.
